@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Detect Unity Build: If UNITY_VERSION is set, assume we're being built by Unity -->
+  <PropertyGroup Condition="'$(UNITY_VERSION)' != ''">
+    <DefineConstants>UNITY;$(DefineConstants)</DefineConstants>
+    <UnityBuild>true</UnityBuild>
+  </PropertyGroup>
+
+  <!-- Otherwise, assume it's a .NET build -->
+  <PropertyGroup Condition="'$(UNITY_VERSION)' == ''">
+    <DefineConstants>DOTNET;$(DefineConstants)</DefineConstants>
+    <UnityBuild>false</UnityBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UnityBuild)' != 'true'">
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>

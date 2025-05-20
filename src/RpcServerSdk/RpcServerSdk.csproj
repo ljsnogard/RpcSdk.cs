@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OneOf" Version="3.0.271" />
+    <PackageReference Include="UniTask" Version="2.5.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BufferKit\BufferKit.csproj" />
+    <ProjectReference Include="..\RpcMuxSdk\RpcMuxSdk.csproj" />
+    <ProjectReference Include="..\RpcPeerComSdk\RpcPeerComSdk.csproj" />
+    <ProjectReference Include="..\RpcClientSdk\RpcClientSdk.csproj" />
+  </ItemGroup>
+
+</Project>

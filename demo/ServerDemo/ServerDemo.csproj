@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+
+    <PublishSingleFile>true</PublishSingleFile>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommandLineParser" Version="2.9.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Tomlyn" Version="0.18.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BufferKit\BufferKit.csproj" />
+    <ProjectReference Include="..\..\demo\ClientDemo\ClientDemo.csproj" />
+    <ProjectReference Include="..\..\src\RpcClientSdk\RpcClientSdk.csproj" />
+    <ProjectReference Include="..\..\src\RpcServerSdk\RpcServerSdk.csproj" />
+    <ProjectReference Include="..\LiquidRainbowRpcV0\LiquidRainbowRpcV0.csproj" />
+  </ItemGroup>
+
+</Project>
