@@ -5,8 +5,6 @@
 
     using Cysharp.Threading.Tasks;
 
-    using OneOf;
-
     using BufferKit;
 
     public readonly struct ChannelId: IEquatable<ChannelId>, IComparable<ChannelId>
@@ -47,16 +45,16 @@
 
     public readonly struct ChannelError
     {
-        public readonly OneOf<RingBufferError, IIoError> InnerError;
+        public readonly Result<RingBufferError, IIoError> InnerError;
 
-        public ChannelError(OneOf<RingBufferError, IIoError> innerError)
+        public ChannelError(Result<RingBufferError, IIoError> innerError)
             => this.InnerError = innerError;
 
         public static ChannelError FromBufferError(IIoError bufferError)
-            => new ChannelError(OneOf<RingBufferError, IIoError>.FromT1(bufferError));
+            => new ChannelError(Result<RingBufferError, IIoError>.Err(bufferError));
 
         public static ChannelError FromRingBufferError(RingBufferError ringBuffError)
-            => new ChannelError(OneOf<RingBufferError, IIoError>.FromT0(ringBuffError));
+            => new ChannelError(Result<RingBufferError, IIoError>.Err(ringBuffError));
     }
 
     public sealed class Channel<T>

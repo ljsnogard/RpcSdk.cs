@@ -11,14 +11,16 @@ Sdk 代码
 ### test
 Sdk 代码的单元测试项目
 
-## 客户端使用指南
+## Unity 开发结合 SVN 使用指南
 
-设置你的客户端，排除以下目录和文件
+设置svn，排除以下目录和文件
 
 ```
 ./demo
 ./docs
 ./test
+./src/RpcServerSdk
+
 **/bin
 **/obj
 *.csproj

@@ -9,8 +9,6 @@ namespace RpcMuxSdk
 
     using Cysharp.Threading.Tasks;
 
-    using OneOf;
-
     /// <summary>
     /// 接收端数据分离器，用于从输入设备中接收和解析帧流数据，并投放到 channel 的接收队列中
     /// </summary>

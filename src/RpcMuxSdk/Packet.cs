@@ -242,7 +242,7 @@ namespace RpcMuxSdk
             NUsize offset = 1;
 
             // Write SrcPort
-            if (header.SrcPort.GetMinRepr().TryPickT0(out var u16SrcPort, out var u32SrcPort))
+            if (header.SrcPort.GetMinRepr().TryOk(out var u16SrcPort, out var u32SrcPort))
             {
                 NUsize len = sizeof(DualByte);
                 var buff = buffer.Slice(offset, len);
@@ -259,7 +259,7 @@ namespace RpcMuxSdk
             }
 
             // Write DstPort
-            if (header.DstPort.GetMinRepr().TryPickT0(out var u16DstPort, out var u32DstPort))
+            if (header.DstPort.GetMinRepr().TryOk(out var u16DstPort, out var u32DstPort))
             {
                 NUsize len = sizeof(DualByte);
                 var buff = buffer.Slice(offset, len);

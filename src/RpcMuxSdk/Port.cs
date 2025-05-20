@@ -3,9 +3,9 @@ namespace RpcMuxSdk
     using System;
     using System.Diagnostics.CodeAnalysis;
 
-    using OneOf;
+    using BufferKit;
 
-    public readonly struct Port: IComparable<Port>, IEquatable<Port>
+    public readonly struct Port : IComparable<Port>, IEquatable<Port>
     {
         public readonly UInt32 code;
 
@@ -33,12 +33,12 @@ namespace RpcMuxSdk
         public int CompareTo(Port other)
             => this.code.CompareTo(other.code);
 
-        public OneOf<UInt16, UInt32> GetMinRepr()
+        public Result<UInt16, UInt32> GetMinRepr()
         {
             if (this.code <= UInt16.MaxValue)
-                return (UInt16)this.code;
+                return Result.Ok((UInt16)this.code);
             else
-                return this.code;
+                return Result.Err(this.code);
         }
 
         public bool Equals(Port other)
@@ -53,10 +53,10 @@ namespace RpcMuxSdk
         public override bool Equals([NotNullWhen(true)] object? obj)
             => obj is Port port && port.code == this.code;
 
-        public static bool operator == (Port lhs, Port rhs)
+        public static bool operator ==(Port lhs, Port rhs)
             => lhs.code == rhs.code;
 
-        public static bool operator != (Port lhs, Port rhs)
+        public static bool operator !=(Port lhs, Port rhs)
             => lhs.code != rhs.code;
     }
 }

@@ -4,8 +4,7 @@ namespace RpcServerSdk
 
     using Cysharp.Threading.Tasks;
 
-    using OneOf;
-
+    using BufferKit;
     using RpcPeerComSdk;
 
     public readonly struct ConfigureServicesError
@@ -32,7 +31,7 @@ namespace RpcServerSdk
     /// <param name="request">The request argument data.</param>
     /// <param name="token">Cancellation token passed by the host.</param>
     /// <returns></returns>
-    public delegate UniTask<OneOf<TResponse, IRequestError>> FnHandleRequest<TRequest, TResponse>(
+    public delegate UniTask<Result<TResponse, IRequestError>> FnHandleRequest<TRequest, TResponse>(
         Uri uri,
         AccessMethod accessMethod,
         IAsyncEnumerable<Header> headers,
@@ -55,13 +54,13 @@ namespace RpcServerSdk
         /// 相同的 uriPattern 可以对应具有不同 AccessMethod 配置的 handler，这些 handler 响应的结果类型之间没有必然联系。
         /// 譬如，以 View 和 Post 方法访问同一个 uri 显然可以设计为不同的返回结果。
         /// </remarks>
-        public OneOf<IConfigureServices, ConfigureServicesError> AddHandler<TRequest, TResponse>(
+        public Result<IConfigureServices, ConfigureServicesError> AddHandler<TRequest, TResponse>(
             string uriTemplate,
             AccessMethod accessMethod,
             FnHandleRequest<TRequest, TResponse> handler
         );
 
-        public OneOf<IConfigureServices, ConfigureServicesError> SetPermissions(
+        public Result<IConfigureServices, ConfigureServicesError> SetPermissions(
             string uriTemplate,
             AccessPermissions permissions
         );

@@ -7,7 +7,6 @@
 
     using BufferKit;
 
-    using OneOf;
     using System;
 
     public interface IResponseError
@@ -26,6 +25,6 @@
 
     public interface IResponse<TBody>: IResponse
     {
-        public UniTask<OneOf<TBody, IResponseError>> ReadBodyAsync(CancellationToken token = default);
+        public UniTask<Result<TBody, IResponseError>> ReadBodyAsync(CancellationToken token = default);
     }
 }

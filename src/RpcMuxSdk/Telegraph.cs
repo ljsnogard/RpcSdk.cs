@@ -7,8 +7,6 @@
 
     using BufferKit;
 
-    using OneOf;
-
     public readonly struct TelegraphError
     { }
 
@@ -24,10 +22,10 @@
             this.portBinder_ = portBinder;
         }
 
-        public UniTask<OneOf<NUsize, TelegraphError>> SendAsync(RxProxy<byte> packet, CancellationToken token = default)
+        public UniTask<Result<NUsize, TelegraphError>> SendAsync(RxProxy<byte> packet, CancellationToken token = default)
             => throw new NotImplementedException();
 
-        public UniTask<OneOf<RxProxy<byte>, TelegraphError>> RecvAsync(CancellationToken token = default)
+        public UniTask<Result<RxProxy<byte>, TelegraphError>> RecvAsync(CancellationToken token = default)
             => throw new NotImplementedException();
     }
 }

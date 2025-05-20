@@ -8,8 +8,6 @@
 
     using Cysharp.Threading.Tasks;
 
-    using OneOf;
-
     public readonly struct SimpleMuxError
     { }
 
@@ -33,13 +31,13 @@
             this.demultiplexer_ = new Demultiplexer<T>(this.muxCtx_, input);
         }
 
-        public UniTask<OneOf<PortBinder<T>, SimpleMuxError>> BindAsync(Port localPort, CancellationToken token = default)
+        public UniTask<Result<PortBinder<T>, SimpleMuxError>> BindAsync(Port localPort, CancellationToken token = default)
             => throw new NotImplementedException();
 
-        public UniTask<OneOf<Channel<T>, SimpleMuxError>> AcceptAsync(Descriptor<T> descriptor, CancellationToken token = default)
+        public UniTask<Result<Channel<T>, SimpleMuxError>> AcceptAsync(Descriptor<T> descriptor, CancellationToken token = default)
             => throw new NotImplementedException();
 
-        public UniTask<OneOf<TxProxy<T>, SimpleMuxError>> RejectAsync(Descriptor<T> descriptor, CancellationToken token = default)
+        public UniTask<Result<TxProxy<T>, SimpleMuxError>> RejectAsync(Descriptor<T> descriptor, CancellationToken token = default)
             => throw new NotImplementedException();
     }
 

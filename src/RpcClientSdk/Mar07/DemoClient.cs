@@ -10,11 +10,10 @@ namespace RpcPeerComSdk.Mar07
 
     using BufferKit;
 
-    using OneOf;
-
     using RpcMuxSdk;
     using RpcPeerComSdk;
     using RpcClientSdk;
+    using System.Threading.Tasks;
 
     public sealed class DemoClient : IClient, IPusherClient, IPullerClient
     {
@@ -59,7 +58,7 @@ namespace RpcPeerComSdk.Mar07
             return new(socket);
         }
 
-        public UniTask<OneOf<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
+        public UniTask<Result<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
             AccessMethod accessMethod,
             Uri location,
             IAsyncEnumerable<Header> headers,
@@ -96,28 +95,64 @@ namespace RpcPeerComSdk.Mar07
 
         #region IPullerClient
 
-        async UniTask<OneOf<IPullAgent, IClientError>> IPullerClient.PullAsync(
+        async UniTask<Result<IPullAgent, IClientError>> IPullerClient.PullAsync(
             Uri location,
             IAsyncEnumerable<Header> headers,
             CancellationToken token)
         {
             var agent = await this.PullAsync(location, token);
-            return OneOf<IPullAgent, IClientError>.FromT0(agent);
+            return Result.Ok(agent as IPullAgent);
         }
 
         #endregion
 
         #region IPusherClient
 
-        async UniTask<OneOf<IPushAgent, IClientError>> IPusherClient.PushAsync(
+        async UniTask<Result<IPushAgent, IClientError>> IPusherClient.PushAsync(
             Uri location,
             IAsyncEnumerable<Header> headers,
             CancellationToken token)
         {
             var agent = await this.PushAsync(location, token);
-            return OneOf<IPushAgent, IClientError>.FromT0(agent);
+            return Result.Ok(agent as IPushAgent);
         }
 
         #endregion
+    }
+
+    public sealed class ApiCall<TArg, TRes> : ICallerClient<TArg, TRes>
+    {
+        private readonly DemoClient client_;
+
+        internal ApiCall(DemoClient client)
+            => this.client_ = client;
+
+        public UniTask<Result<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
+            AccessMethod accessMethod,
+            Uri location,
+            IAsyncEnumerable<Header> headers,
+            TReqeust body,
+            CancellationToken token = default)
+        {
+            return this.client_.RequestAsync<TReqeust, TResult>(accessMethod, location, headers, body, token);
+        }
+
+        public async UniTask<Result<TRes, IClientError>> CallAsync(
+            Uri location,
+            IAsyncEnumerable<Header> headers,
+            TArg arguments,
+            CancellationToken token = default)
+        {
+            var reqRes = await this.RequestAsync<object?, TRes>(
+                accessMethod: AccessMethod.Call,
+                location: location,
+                headers: headers,
+                body: null,
+                token: token
+            );
+            if (reqRes.TryOk(out var response, out var err))
+                return Result.Err(err);
+            throw new NotFiniteNumberException();
+        }
     }
 }

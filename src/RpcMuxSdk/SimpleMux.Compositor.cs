@@ -10,8 +10,6 @@ namespace RpcMuxSdk
 
     using Cysharp.Threading.Tasks;
 
-    using OneOf;
-
     /// <summary>
     /// 发送端数据合成器，用于将多个 channel 的合成为帧流数据并通过输出端发送
     /// </summary>
@@ -53,7 +51,7 @@ namespace RpcMuxSdk
             return new Compositor<T>(arena, muxContext, output);
         }
 
-        public UniTask<OneOf<NUsize, IIoError>> SendSignalAsync(
+        public UniTask<Result<NUsize, IIoError>> SendSignalAsync(
             ReadOnlyMemory<T> signalFrameData,
             Port localPort,
             Port remotePort,
@@ -65,7 +63,7 @@ namespace RpcMuxSdk
         /// <summary>
         /// 投递一个发送任务，发送内容由 datagram 指定; 发送最多一帧后，返回已发送的数据量。
         /// </summary>
-        public UniTask<OneOf<NUsize, IIoError>> SendTelegraphDataAsync(
+        public UniTask<Result<NUsize, IIoError>> SendTelegraphDataAsync(
             RxProxy<T> rx,
             Port localPort,
             Port remotePort,
@@ -79,7 +77,7 @@ namespace RpcMuxSdk
         /// 发送一帧或多帧后，返回已发送到数据量。
         /// 然后 rx 需自行通过 <c>ReaderSkipAsync</c> 方法移动指针。
         /// </summary>
-        public UniTask<OneOf<NUsize, IIoError>> SendChannelDataAsync(
+        public UniTask<Result<NUsize, IIoError>> SendChannelDataAsync(
             RxProxy<T> rx,
             Port localPort,
             Port remotePort,
@@ -156,7 +154,7 @@ namespace RpcMuxSdk
                 this.tokens_ = new();
             }
 
-            public async UniTask<OneOf<U, NUsize>> TryInspectLastAsync<U>(
+            public async UniTask<Result<U, NUsize>> TryInspectLastAsync<U>(
                 Func<Arena<EnqueuedOutput>.Token, U> inspect,
                 CancellationToken cancelToken = default)
             {
@@ -164,9 +162,9 @@ namespace RpcMuxSdk
                 {
                     await this.sema_.WaitAsync(cancelToken);
                     if (this.tokens_.Count == 0)
-                        return NUsize.Zero;
+                        return Result.Err(NUsize.Zero);
                     var kv = this.tokens_.Last();
-                    return inspect(kv.Value);
+                    return Result.Ok(inspect(kv.Value));
                 }
                 finally
                 {
@@ -175,7 +173,7 @@ namespace RpcMuxSdk
                 }
             }
 
-            public async UniTask<OneOf<uint, Arena<EnqueuedOutput>.Token>> TryEnqueueAsync(
+            public async UniTask<Result<uint, Arena<EnqueuedOutput>.Token>> TryEnqueueAsync(
                 Arena<EnqueuedOutput>.Token arenaToken,
                 CancellationToken cancelToken = default)
             {
@@ -188,9 +186,9 @@ namespace RpcMuxSdk
 
                     var sn = arenaToken.ByRef().SerialNum;
                     if (this.tokens_.TryAdd(sn, arenaToken))
-                        return sn;
+                        return Result.Ok(sn);
                     if (this.tokens_.TryGetValue(sn, out var duplication))
-                        return duplication;
+                        return Result.Err(duplication);
                     else
                         throw new Exception("Enqueue failed with unknown reasone");
                 }
@@ -201,7 +199,7 @@ namespace RpcMuxSdk
                 }
             }
 
-            public async UniTask<OneOf<Arena<EnqueuedOutput>.Token, NUsize>> TryDequeueAsync(
+            public async UniTask<Result<Arena<EnqueuedOutput>.Token, NUsize>> TryDequeueAsync(
                 Arena<EnqueuedOutput>.Token arenaToken,
                 CancellationToken cancelToken = default)
             {
@@ -211,9 +209,9 @@ namespace RpcMuxSdk
 
                     var sn = arenaToken.ByRef().SerialNum;
                     if (this.tokens_.Remove(sn, out var removed))
-                        return removed;
+                        return Result.Ok(removed);
                     else
-                        return (NUsize)this.tokens_.Count;
+                        return Result.Err((NUsize)this.tokens_.Count);
                 }
                 finally
                 {

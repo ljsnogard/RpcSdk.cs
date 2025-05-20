@@ -8,8 +8,6 @@
 
     using BufferKit;
 
-    using OneOf;
-
     using RpcMuxSdk;
     using RpcPeerComSdk;
 
@@ -24,7 +22,7 @@
         /// <param name="body">请求体自身的数据</param>
         /// <param name="token"></param>
         /// <returns></returns>
-        public UniTask<OneOf<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
+        public UniTask<Result<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
             AccessMethod accessMethod,
             Uri location,
             IAsyncEnumerable<Header> headers,
@@ -38,7 +36,7 @@
     /// </summary>
     public interface IViewerClient : IClient
     {
-        public UniTask<OneOf<IBuffRx<byte>, IClientError>> ViewAsync(
+        public UniTask<Result<IBuffRx<byte>, IClientError>> ViewAsync(
             Uri location,
             IAsyncEnumerable<Header> headers,
             CancellationToken token = default
@@ -51,7 +49,7 @@
     /// <typeparam name="TItem"></typeparam> <summary>
     public interface IViewerClient<TItem> : IViewerClient
     {
-        public UniTask<OneOf<TItem, IClientError>> ViewAsync(
+        public UniTask<Result<TItem, IClientError>> ViewAsync(
             Uri location,
             CancellationToken token = default
         );
@@ -68,7 +66,7 @@
     /// <typeparam name="TRes"></typeparam>
     public interface ICallerClient<TArg, TRes> : IClient
     {
-        public UniTask<OneOf<TRes, IClientError>> CallAsync(
+        public UniTask<Result<TRes, IClientError>> CallAsync(
             Uri location,
             IAsyncEnumerable<Header> headers,
             TArg arguments,
@@ -78,7 +76,7 @@
 
     public interface IPusherClient : IClient
     {
-        public UniTask<OneOf<IPushAgent, IClientError>> PushAsync(
+        public UniTask<Result<IPushAgent, IClientError>> PushAsync(
             Uri location,
             IAsyncEnumerable<Header> headers,
             CancellationToken token = default
@@ -87,7 +85,7 @@
 
     public interface IPusherClient<TItem> : IPusherClient
     {
-        public UniTask<OneOf<IPushAgent<TItem>, IClientError>> PushAsync<THeaders>(
+        public UniTask<Result<IPushAgent<TItem>, IClientError>> PushAsync<THeaders>(
             Uri location,
             THeaders headers,
             CancellationToken token = default)
@@ -96,7 +94,7 @@
 
     public interface IPullerClient : IClient
     {
-        public UniTask<OneOf<IPullAgent, IClientError>> PullAsync(
+        public UniTask<Result<IPullAgent, IClientError>> PullAsync(
             Uri location,
             IAsyncEnumerable<Header> headers,
             CancellationToken token = default
@@ -105,7 +103,7 @@
 
     public interface IPullerClient<TItem> : IClient
     {
-        public UniTask<OneOf<IPullAgent<TItem>, IClientError>> PullAsync<THeaders>(
+        public UniTask<Result<IPullAgent<TItem>, IClientError>> PullAsync<THeaders>(
             Uri location,
             THeaders headers,
             CancellationToken token = default)
@@ -114,7 +112,7 @@
 
     public static class ClientExtensions
     {
-        public static async UniTask<OneOf<TItem, IClientError>> ViewAsync<TItem>(
+        public static async UniTask<Result<TItem, IClientError>> ViewAsync<TItem>(
             this IClient client,
             Uri location,
             CancellationToken token = default)
@@ -132,15 +130,15 @@
             if (response is not IResponse<TItem> resp)
                 throw new Exception("Unexpected result");
 
-            var maybeItem = await resp.ReadBodyAsync(token);
-            if (!maybeItem.TryPickT0(out var item , out var respErr))
+            var readRes = await resp.ReadBodyAsync(token);
+            if (!readRes.TryOk(out var item , out var respErr))
                 throw respErr.AsException();
-            return item;
+            return Result.Ok(item);
         }
 
         #region Invoke
 
-        public static UniTask<OneOf<TRes, IClientError>> CallAsync<TArg, TRes>(
+        public static UniTask<Result<TRes, IClientError>> CallAsync<TArg, TRes>(
             this IClient client,
             Uri location,
             TArg arguments,
@@ -154,7 +152,7 @@
             );
         }
 
-        public static async UniTask<OneOf<TRes, IClientError>> CallAsync<TArg, TRes>(
+        public static async UniTask<Result<TRes, IClientError>> CallAsync<TArg, TRes>(
             this IClient client,
             Uri location,
             IAsyncEnumerable<Header> headers,
@@ -164,14 +162,14 @@
             if (client is ICallerClient<TArg, TRes> caller)
                 return await caller.CallAsync(location, headers, arguments, token);
 
-            var maybeResponse = await client.RequestAsync<TArg, TRes>(
+            var reqRes = await client.RequestAsync<TArg, TRes>(
                 accessMethod: AccessMethod.Call,
                 location: location,
                 headers: headers,
                 body: arguments,
                 token: token
             );
-            if (!maybeResponse.TryPickT0(out var response, out var clientError))
+            if (!reqRes.TryOk(out var response, out var clientError))
                 throw clientError.AsException();
             throw new NotImplementedException();
         }
@@ -185,7 +183,7 @@
         /// </summary>
         /// <param name="location"></param>
         /// <returns></returns>
-        public static async UniTask<OneOf<IPullAgent<TItem>, IClientError>> PullAsync<TItem>(
+        public static async UniTask<Result<IPullAgent<TItem>, IClientError>> PullAsync<TItem>(
             this IClient client,
             Uri location,
             IAsyncEnumerable<Header> headers,
@@ -205,7 +203,7 @@
         /// </summary>
         /// <param name="location"></param>
         /// <returns></returns>
-        public static async UniTask<OneOf<IPushAgent<TItem>, IClientError>> PushAsync<TItem>(
+        public static async UniTask<Result<IPushAgent<TItem>, IClientError>> PushAsync<TItem>(
             this IClient client,
             Uri location,
             IAsyncEnumerable<Header> headers,

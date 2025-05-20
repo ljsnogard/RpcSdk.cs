@@ -4,9 +4,9 @@ namespace RpcClientSdk
     using System.Collections.Generic;
     using System.Threading;
 
-    using Cysharp.Threading.Tasks;
+    using BufferKit;
 
-    using OneOf;
+    using Cysharp.Threading.Tasks;
 
     using RpcMuxSdk;
     using RpcPeerComSdk;
@@ -20,7 +20,7 @@ namespace RpcClientSdk
             this.smux_ = smux;
         }
 
-        public UniTask<OneOf<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
+        public UniTask<Result<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
             AccessMethod accessMethod,
             Uri location,
             IAsyncEnumerable<Header> headers,

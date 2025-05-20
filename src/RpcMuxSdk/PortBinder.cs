@@ -7,7 +7,6 @@
 
     using BufferKit;
 
-    using OneOf;
     using LoggingSdk;
 
     public readonly struct PortBinderError
@@ -34,7 +33,7 @@
         public Port LocalPort
             => this.localPort_;
 
-        public async UniTask<OneOf<Listener<T>, PortBinderError>> GetListenerAsync(CancellationToken token = default)
+        public async UniTask<Result<Listener<T>, PortBinderError>> GetListenerAsync(CancellationToken token = default)
         {
             bool succeeded = false;
             try
@@ -49,7 +48,7 @@
             }
         }
 
-        public async UniTask<OneOf<Telegraph<T>, PortBinderError>> GetTelegraphAsync(CancellationToken token = default)
+        public async UniTask<Result<Telegraph<T>, PortBinderError>> GetTelegraphAsync(CancellationToken token = default)
         {
             bool succeeded = false;
             try
