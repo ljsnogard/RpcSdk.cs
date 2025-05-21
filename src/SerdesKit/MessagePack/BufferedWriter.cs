@@ -6,11 +6,11 @@ namespace SerdesKit.MessagePack
     using Cysharp.Threading.Tasks;
     using BufferKit;
 
-    public sealed class BufferdWriter
+    public sealed class BufferedWriter
     {
         private readonly TxProxy<byte> tx_;
 
-        public BufferdWriter(TxProxy<byte> tx)
+        public BufferedWriter(TxProxy<byte> tx)
             => this.tx_ = tx;
 
         public UniTask<NUsize> WriteU8Async(byte data, CancellationToken token = default)
@@ -65,6 +65,9 @@ namespace SerdesKit.MessagePack
             => throw new NotImplementedException();
 
         public UniTask<NUsize> WriteMapHeader(NUsize mapItemCount, CancellationToken token = default)
+            => throw new NotImplementedException();
+
+        public UniTask<Result<NUsize, Serializer<X>>> TryWriteAsync<X>(X data, CancellationToken token = default)
             => throw new NotImplementedException();
     }
 }

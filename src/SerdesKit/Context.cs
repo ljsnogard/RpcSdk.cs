@@ -3,19 +3,17 @@ namespace SerdesKit
     using System;
     using System.Collections.Generic;
     using System.Threading;
-    using System.Threading.Tasks;
 
     using Cysharp.Threading.Tasks;
 
     using BufferKit;
     using System.Linq;
     using LoggingSdk;
+    using VisitAsyncUtils;
 
     public interface ISerdesTypeContext
     {
         public Type DataType { get; }
-
-        public bool IsConcrete { get; }
 
         public bool HasSubTypes { get; }
 
@@ -23,9 +21,9 @@ namespace SerdesKit
 
         public uint TypeHex { get; }
 
-        public ValueTask<ReadOnlyMemory<ISerdesTypeContext>> GetSubTypesAsync(CancellationToken token = default);
+        public UniTask<ReadOnlyMemory<ISerdesTypeContext>> GetSubTypesAsync(CancellationToken token = default);
 
-        public ValueTask<ReadOnlyMemory<(string, ISerdesTypeContext)>> GetFieldsAsync(CancellationToken token = default);
+        public UniTask<ReadOnlyMemory<(string, ISerdesTypeContext)>> GetFieldsAsync(CancellationToken token = default);
     }
 
     public static class StrHashExtensions
@@ -99,9 +97,6 @@ namespace SerdesKit
         public Type DataType
             => this.dataType_;
 
-        public bool IsConcrete
-            => true;
-
         public bool HasSubTypes
             => this.subTypes_.Length > 0;
 
@@ -117,7 +112,7 @@ namespace SerdesKit
         public uint TypeHex
             => this.typeHex_;
 
-        ValueTask<ReadOnlyMemory<ISerdesTypeContext>> ISerdesTypeContext.GetSubTypesAsync(CancellationToken token)
+        UniTask<ReadOnlyMemory<ISerdesTypeContext>> ISerdesTypeContext.GetSubTypesAsync(CancellationToken token)
         {
             var list = new ReadOnlyMemory<ISerdesTypeContext>(this
                 .subTypes_
@@ -128,7 +123,7 @@ namespace SerdesKit
             return new(list);
         }
 
-        ValueTask<ReadOnlyMemory<(string, ISerdesTypeContext)>> ISerdesTypeContext.GetFieldsAsync(CancellationToken token)
+        UniTask<ReadOnlyMemory<(string, ISerdesTypeContext)>> ISerdesTypeContext.GetFieldsAsync(CancellationToken token)
         {
             var list = new ReadOnlyMemory<(string, ISerdesTypeContext)>(this
                 .fields_
@@ -178,7 +173,7 @@ namespace SerdesKit
                 }
             }
 
-            public async ValueTask<Option<ConcreteSerdesTypeContext>> FindWithHexAsync(uint typeHex, CancellationToken token = default)
+            public async UniTask<Option<ConcreteSerdesTypeContext>> FindWithHexAsync(uint typeHex, CancellationToken token = default)
             {
                 var log = Logger.Shared;
                 Option<AsyncMutex.Guard> optGuard = Option.None;
@@ -205,7 +200,7 @@ namespace SerdesKit
                 }
             }
 
-            public async ValueTask<Option<ConcreteSerdesTypeContext>> FindWithTypeAsync(Type dataType, CancellationToken token = default)
+            public async UniTask<Option<ConcreteSerdesTypeContext>> FindWithTypeAsync(Type dataType, CancellationToken token = default)
             {
                 var log = Logger.Shared;
                 Option<AsyncMutex.Guard> optGuard = Option.None;
@@ -242,9 +237,9 @@ namespace SerdesKit
                 }
             }
 
-            public async ValueTask<Result<ConcreteSerdesTypeContext, ConcreteSerdesTypeContext>> FindOrAddAsync(
+            public async UniTask<Result<ConcreteSerdesTypeContext, ConcreteSerdesTypeContext>> FindOrAddAsync(
                 Type dataType,
-                Func<uint, Type, CancellationToken, ValueTask<ConcreteSerdesTypeContext>> createContext,
+                Func<uint, Type, CancellationToken, UniTask<ConcreteSerdesTypeContext>> createContext,
                 CancellationToken token = default)
             {
                 var log = Logger.Shared;
