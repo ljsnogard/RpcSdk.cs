@@ -13,7 +13,6 @@ namespace RpcPeerComSdk.Mar07
     using RpcMuxSdk;
     using RpcPeerComSdk;
     using RpcClientSdk;
-    using System.Threading.Tasks;
 
     public sealed class DemoClient : IClient, IPusherClient, IPullerClient
     {
