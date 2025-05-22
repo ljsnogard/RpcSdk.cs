@@ -185,7 +185,7 @@ namespace ServerDemo.ServerTestings.Mar07
             var log = Logger.Shared;
 
             var socket = await BufferedSocket.ConnectAsync(server, token);
-            var client = new DemoClient(socket);
+            var client = new DemoClient(socket, new ApiTypeAssocCache<DemoTestTypeInit>());
             var pushAgent = new PushAgent<IDemoPlayMessage>(
                 await client.PushAsync(Locations.GetPlayerPushLocation(roomCapacity, playerId), token));
 

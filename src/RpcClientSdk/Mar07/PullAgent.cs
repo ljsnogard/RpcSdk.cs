@@ -2,8 +2,6 @@ namespace RpcClientSdk.Mar07
 {
     using System;
     using System.Buffers.Binary;
-    using System.Collections.Generic;
-    using System.Linq;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -54,12 +52,19 @@ namespace RpcClientSdk.Mar07
 
         private readonly string name_;
 
-        public PullAgent(InputProxy<byte> input, Uri location, string name)
+        private readonly IApiTypeBind apiTypeBind_;
+
+        public PullAgent
+            ( InputProxy<byte> input
+            , Uri location
+            , string name
+            , IApiTypeBind apiTypeBind)
         {
             this.input_ = input;
             this.location_ = location;
             this.mutex_ = new();
             this.name_ = name;
+            this.apiTypeBind_ = apiTypeBind;
         }
 
         public Uri Location
@@ -67,6 +72,9 @@ namespace RpcClientSdk.Mar07
 
         public string Name
             => this.name_;
+
+        internal IApiTypeBind ApiTypeBind
+            => this.apiTypeBind_;
 
         internal async UniTask<Result<(uint, ReadOnlyMemory<byte>), PullError>> SyncRecvAsync(CancellationToken token = default)
         {
@@ -140,57 +148,6 @@ namespace RpcClientSdk.Mar07
             }
         }
 
-        private static Lazy<SemaphoreSlim> lazyTypeDictSema_ = new(() => new SemaphoreSlim(1, 1));
-
-        private static readonly Dictionary<uint, Type> typeDict_ = new();
-
-        internal static async Task<Result<Type, Dictionary<uint, Type>>> FindTypeWithBaseAndHexAsync(Type apiType, uint hexCode)
-        {
-            const string ASM_PREFIX = "LiquidRainbow";
-            var log = Logger.Shared;
-            var typeDictSema = lazyTypeDictSema_.Value;
-            try
-            {
-                await typeDictSema.WaitAsync();
-                while (true)
-                {
-                    if (PullAgent.typeDict_.TryGetValue(hexCode, out var dstType))
-                        return Result.Ok(dstType);
-
-                    if (PullAgent.typeDict_.Count > 0)
-                        break;
-
-                    var assemblies =
-                        from a in AppDomain.CurrentDomain.GetAssemblies()
-                        where a.FullName.StartsWith(ASM_PREFIX)
-                        select a;
-                    var types =
-                        from asm in assemblies
-                        from t in asm.GetTypes()
-                        where apiType.IsAssignableFrom(t)
-                        select t;
-
-                    if (!types.Any())
-                        throw new Exception($"No data types found matching {apiType.FullName}");
-
-                    foreach (Type t in types)
-                    {
-                        var key = t.FullName.GetStableHashCode();
-                        if (PullAgent.typeDict_.TryAdd(key, t))
-                            log.Info($"Added type({t.FullName}) with key: {key:X8}");
-                        else
-                            log.Error($"Failed adding type({t.FullName}) with key: {key:X8}");
-                    }
-                }
-                return Result.Err(typeDict_);
-            }
-            finally
-            {
-                if (typeDictSema.CurrentCount == 0)
-                    typeDictSema.Release();
-            }
-        }
-
         public UniTask<Result<RxProxy<byte>, PullError>> RecvAsync(CancellationToken token = default)
             => throw new NotImplementedException();
 
@@ -213,11 +170,16 @@ namespace RpcClientSdk.Mar07
 
         private readonly SemaphoreSlim sema_;
 
-        public PullAgent(
-            InputProxy<byte> input,
-            Uri location,
-            string name,
-            Func<Channel<TItem>> createBuffer) : this(new PullAgent(input, location, name), createBuffer)
+        public PullAgent
+            ( InputProxy<byte> input
+            , Uri location
+            , string name
+            , Func<Channel<TItem>> createBuffer
+            , IApiTypeBind apiTypeBind
+            ) 
+            : this
+                (new PullAgent(input, location, name, apiTypeBind)
+                , createBuffer)
         { }
 
         public PullAgent(
@@ -261,12 +223,13 @@ namespace RpcClientSdk.Mar07
                         throw pullError.AsException();
 
                     var (typeHex, jsonHex) = buff;
-                    var maybeType = await PullAgent.FindTypeWithBaseAndHexAsync(typeof(TItem), typeHex);
-                    if (!maybeType.TryOk(out var dstType, out var cachedTypes))
+                    var apiTypebind = this.baseAgent_.ApiTypeBind;
+                    var optType = apiTypebind.FindType(typeHex);
+                    if (!optType.IsSome(out var dstType))
                     {
                         log.Warn($"[{nameof(PullAgent<TItem>)}.{nameof(RxLoopAsync_)}](items_: {this.items_.GetHashCode():X8}, Location: {this.baseAgent_.Location}) cannot find type with typeHex({typeHex:X8}).");
-                        foreach (var kv in cachedTypes)
-                            log.Debug($"\t{kv.Key:X8}: {kv.Value.FullName}");
+                        foreach (var kv in apiTypebind.GetTypeHexEntries())
+                            log.Debug($"\t{kv.Item1:X8}: {kv.Item2.FullName}");
                         throw new Exception($"No types found with typeHex({typeHex:X8})");
                     }
 

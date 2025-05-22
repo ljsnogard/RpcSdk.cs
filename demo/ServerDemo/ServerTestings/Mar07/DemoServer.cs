@@ -41,6 +41,34 @@ namespace ServerDemo.ServerTestings.Mar07
         }
     }
 
+    public readonly struct DemoTestTypeInit : IApiTypeInit
+    {
+        public AssociationMapping InitAssociation()
+        {
+            return new Dictionary<Type, IEnumerable<Type>>
+            {
+                [typeof(IDemoPlayMessage)] = new[] { 
+                    typeof(GameRoomListing), typeof(GameRoomEnter), typeof(PlayerEnter), typeof(GameStartCountdown), typeof(PlayerFrameAct), typeof(OneFrameInputsMessage)
+                },
+            };
+        }
+
+        public TypeHexMapping InitTypeHex()
+        {
+#pragma warning disable CS8604 // Possible null reference argument.
+            return new SortedDictionary<uint, Type>
+            {
+                [typeof(GameRoomListing).FullName.GetStableHashCode()] = typeof(GameRoomListing),
+                [typeof(GameRoomEnter).FullName.GetStableHashCode()] = typeof(GameRoomEnter),
+                [typeof(PlayerEnter).FullName.GetStableHashCode()] = typeof(PlayerEnter),
+                [typeof(GameStartCountdown).FullName.GetStableHashCode()] = typeof(GameStartCountdown),
+                [typeof(PlayerFrameAct).FullName.GetStableHashCode()] = typeof(PlayerFrameAct),
+                [typeof(OneFrameInputsMessage).FullName.GetStableHashCode()] = typeof(OneFrameInputsMessage),
+            };
+#pragma warning restore CS8604 // Possible null reference argument.
+        }
+    }
+
     public sealed class DemoServer : IApp
     {
         private readonly CancellationTokenSource prepareStageCts_;
@@ -152,7 +180,8 @@ namespace ServerDemo.ServerTestings.Mar07
                     new PullAgent(
                         input,
                         location: new Uri($"rpc://lr.demo/Pull{client.RemoteEndPoint:X8}"),
-                        name: $"(l: {client.LocalEndPoint}, r: {client.RemoteEndPoint})"
+                        name: $"(l: {client.LocalEndPoint}, r: {client.RemoteEndPoint})",
+                        new ApiTypeAssocCache<DemoTestTypeInit>()
                     ),
                     () => Cysharp.Threading.Tasks.Channel.CreateSingleConsumerUnbounded<IDemoPlayMessage>()
                 );
@@ -322,7 +351,8 @@ namespace ServerDemo.ServerTestings.Mar07
                 input,
                 location: Locations.GetPlayerPushLocation(roomCapacity, id),
                 name: $"(l: {socket.LocalEndPoint}, r: {socket.RemoteEndPoint})",
-                () => Cysharp.Threading.Tasks.Channel.CreateSingleConsumerUnbounded<IDemoPlayMessage>()
+                () => Cysharp.Threading.Tasks.Channel.CreateSingleConsumerUnbounded<IDemoPlayMessage>(),
+                new ApiTypeAssocCache<DemoTestTypeInit>()
             );
         }
 

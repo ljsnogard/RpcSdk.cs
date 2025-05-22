@@ -18,9 +18,9 @@ namespace RpcClientSdk.Mar07
     {
         private readonly Socket socket_;
 
-        private readonly InputProxy<byte> input_;
+        private readonly SocketInput input_;
 
-        private readonly OutputProxy<byte> output_;
+        private readonly SocketOutput output_;
 
         private readonly AsyncMutex inputMutex_;
 
@@ -28,16 +28,23 @@ namespace RpcClientSdk.Mar07
 
         private readonly SortedDictionary<ChannelId, DemoSession> sessionDict_;
 
-        public DemoClient(Socket socket)
+        private readonly IApiTypeBind apiTypeBind_;
+
+        public DemoClient(Socket socket, IApiTypeBind apiTypeBind)
         {
-            this.socket_ = socket;
             var (output, input) = SocketIo.Split(socket);
-            this.input_ = input.GetCachedProxy();
-            this.output_ = output.GetCachedProxy();
+
+            this.socket_ = socket;
+            this.input_ = input;
+            this.output_ = output;
             this.inputMutex_ = new();
             this.outputMutex_ = new();
             this.sessionDict_ = new SortedDictionary<ChannelId, DemoSession>();
+            this.apiTypeBind_ = apiTypeBind;
         }
+
+        internal IApiTypeBind ApiTypeBind
+            => this.apiTypeBind_;
 
         internal AsyncMutex OutputMutex
             => this.outputMutex_;
@@ -45,24 +52,30 @@ namespace RpcClientSdk.Mar07
         internal AsyncMutex InputMutex
             => this.inputMutex_;
 
-        internal Socket Socket
-            => this.socket_;
+        internal InputProxy<byte> Input
+            => this.input_.GetCachedProxy();
 
-        public static async UniTask<DemoClient> ConnectAsync(
-            IPEndPoint server,
-            NUsize buffCapacity,
-            CancellationToken token = default)
+        internal OutputProxy<byte> Output
+            => this.output_.GetCachedProxy();
+
+        public static async UniTask<DemoClient> ConnectAsync<TApiTypeInit>
+            ( IPEndPoint server
+            , NUsize buffCapacity
+            , CancellationToken token = default
+            )
+            where TApiTypeInit : IApiTypeInit, new()
         {
             var socket = await BufferedSocket.ConnectAsync(server, token);
-            return new(socket);
+            var apiTypeBind = new ApiTypeAssocCache<TApiTypeInit>();
+            return new(socket, apiTypeBind);
         }
 
-        public UniTask<Result<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>(
-            AccessMethod accessMethod,
-            Uri location,
-            IAsyncEnumerable<Header> headers,
-            TReqeust body,
-            CancellationToken token)
+        public UniTask<Result<IResponse<TResult>, IClientError>> RequestAsync<TReqeust, TResult>
+            ( AccessMethod accessMethod
+            , Uri location
+            , IAsyncEnumerable<Header> headers
+            , TReqeust body
+            , CancellationToken token)
         {
             throw new NotImplementedException();
         }
@@ -74,7 +87,7 @@ namespace RpcClientSdk.Mar07
 
             return UniTask.FromResult(
                 new PushAgent(
-                    this.output_,
+                    this.Output,
                     location,
                     name: $"(l: {this.socket_.LocalEndPoint}, r: {this.socket_.RemoteEndPoint})"
             ));
@@ -86,9 +99,10 @@ namespace RpcClientSdk.Mar07
         {
             return UniTask.FromResult(
                 new PullAgent(
-                    this.input_,
+                    this.Input,
                     location,
-                    name: $"(l: {this.socket_.LocalEndPoint}, r: {this.socket_.RemoteEndPoint})"
+                    name: $"(l: {this.socket_.LocalEndPoint}, r: {this.socket_.RemoteEndPoint})",
+                    this.apiTypeBind_
             ));
         }
 
