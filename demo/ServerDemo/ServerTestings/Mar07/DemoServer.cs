@@ -4,11 +4,9 @@ namespace ServerDemo.ServerTestings.Mar07
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Linq;
-    using System.Net;
     using System.Net.Sockets;
     using System.Runtime.CompilerServices; // for EnumerationCancellationAttributes
     using System.Threading;
-    using System.Threading.Channels;
     using System.Threading.Tasks;
 
     using BufferKit;
@@ -16,7 +14,9 @@ namespace ServerDemo.ServerTestings.Mar07
     using LiquidRainbow.Mar07;
     using LoggingSdk;
     using Newtonsoft.Json;
-    using RpcPeerComSdk.Mar07;
+
+    using RpcClientSdk.Mar07;
+
     using PlayerId = System.UInt32;
 
     public sealed class ServerParameters

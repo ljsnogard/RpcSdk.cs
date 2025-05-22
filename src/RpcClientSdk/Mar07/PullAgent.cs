@@ -1,10 +1,10 @@
-namespace RpcPeerComSdk.Mar07
+namespace RpcClientSdk.Mar07
 {
     using System;
     using System.Buffers.Binary;
     using System.Collections.Generic;
-
     using System.Linq;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
 
@@ -14,10 +14,20 @@ namespace RpcPeerComSdk.Mar07
 
     using LoggingSdk;
 
-    using SerdesKit;
+    using Newtonsoft.Json;
+
+    using RpcPeerComSdk;
 
     static class PullConfig
     {
+        private static readonly Lazy<JsonSerializerSettings> lazyJset_ = new(NewSettings_);
+
+        private static JsonSerializerSettings NewSettings_()
+            => new JsonSerializerSettings() { TypeNameHandling = TypeNameHandling.None };
+
+        public static JsonSerializerSettings DemoDefaultSettings
+            => lazyJset_.Value;
+
         public const int TYPE_HEX_SIZE = PushConfig.TYPE_HEX_SIZE;
 
         public const int JSON_BIN_SIZE = PushConfig.JSON_BIN_SIZE;
@@ -25,13 +35,13 @@ namespace RpcPeerComSdk.Mar07
 
     public readonly struct PullError : IPullError
     {
-        private readonly Exception exception_;
+        public readonly IIoError InnerError;
 
-        public PullError(Exception exception)
-            => this.exception_ = exception;
+        public PullError(IIoError innerError)
+            => this.InnerError = innerError;
 
         public Exception AsException()
-            => this.exception_;
+            => this.InnerError.AsException();
     }
 
     public sealed class PullAgent : IPullAgent
@@ -58,16 +68,6 @@ namespace RpcPeerComSdk.Mar07
         public string Name
             => this.name_;
 
-        /// <summary>
-        /// 接收来自远端推送的数据，这些数据可完成反序列化为指定的对象，对象的类型由 TypeHex 指示
-        /// </summary>
-        /// <param name="token"></param>
-        /// <returns></returns>
-        /// <exception cref="Exception"></exception> <summary>
-        /// 
-        /// </summary>
-        /// <param name="token"></param>
-        /// <returns></returns>
         internal async UniTask<Result<(uint, ReadOnlyMemory<byte>), PullError>> SyncRecvAsync(CancellationToken token = default)
         {
             var log = Logger.Shared;
@@ -83,15 +83,15 @@ namespace RpcPeerComSdk.Mar07
 
                 var readPrefixRes = await this.input_.ReadAsync(prefixBuffer, token);
                 if (!readPrefixRes.TryOk(out var readPrefixLen, out var readPrefixIoErr))
-                    return Result.Err(new PullError());
+                    throw readPrefixIoErr.AsException();
                 if (readPrefixLen != (NUsize)prefixBuffLen)
                     throw new Exception($"Incomplete receive of type str Len, {prefixBuffLen} bytes needed but got {readPrefixLen}");
 
                 var typeHexMem = prefixBuffer.Slice(offset: 0, length: PullConfig.TYPE_HEX_SIZE);
-                var msgSizeMem = prefixBuffer.Slice(offset: PullConfig.TYPE_HEX_SIZE, length: PullConfig.JSON_BIN_SIZE);
+                var jsonLenMem = prefixBuffer.Slice(offset: PullConfig.TYPE_HEX_SIZE, length: PullConfig.JSON_BIN_SIZE);
 
                 var typeHex = BinaryPrimitives.ReadUInt32BigEndian(typeHexMem.Span);
-                var msgSize = BinaryPrimitives.ReadUInt16BigEndian(msgSizeMem.Span);
+                var jsonLen = BinaryPrimitives.ReadUInt16BigEndian(jsonLenMem.Span);
 
 #if DEBUG
                 // try
@@ -106,28 +106,28 @@ namespace RpcPeerComSdk.Mar07
                 // { }
 #endif
 
-                var msgBuff = new Memory<byte>(new byte[msgSize]);
-                var readMsgRes = await this.input_.ReadAsync(msgBuff, token);
-                if (!readMsgRes.TryOk(out var readMsgLen, out var readMsgIoErr))
-                    return Result.Err(new PullError());
-                if (readMsgLen != (NUsize)msgSize)
-                    throw new Exception($"Incomplete receive of msg str Len, {msgSize} bytes needed but got {readMsgLen}");
+                var jsonBuff = new Memory<byte>(new byte[jsonLen]);
+                var readJsonRes = await this.input_.ReadAsync(jsonBuff, token);
+                if (!readJsonRes.TryOk(out var readJsonLen, out var readJsonIoErr))
+                    throw readJsonIoErr.AsException();
+                if (readJsonLen != (NUsize)jsonLen)
+                    throw new Exception($"Incomplete receive of msg str Len, {jsonLen} bytes needed but got {readJsonLen}");
 
 #if DEBUG
-                // try
-                // {
-                //     var jsonHexBuilder = new StringBuilder();
-                //     for (var i = 0; i < jsonBuff.Length; ++i)
-                //         jsonHexBuilder.Append($"{jsonBuff.Span[i]:X2} ");
-                //     var jsonHex = jsonHexBuilder.ToString();
+                try
+                {
+                    var jsonHexBuilder = new StringBuilder();
+                    for (var i = 0; i < jsonBuff.Length; ++i)
+                        jsonHexBuilder.Append($"{jsonBuff.Span[i]:X2} ");
+                    var jsonHex = jsonHexBuilder.ToString();
 
-                //     var jsonStr = System.Text.Encoding.UTF8.GetString(jsonBuff.Span);
-                //     log.Debug($"[{nameof(PullAgent)}.{nameof(SyncRecvAsync)}](Location: {this.Location}, Name: {this.Name}) typeHex: {typeHex:X8}, jsonLen: {jsonLen} ({jsonLen:X4}), json:\n{jsonStr}\n[\n{jsonHex}\n]");
-                // }
-                // finally
-                // { }
+                    var jsonStr = System.Text.Encoding.UTF8.GetString(jsonBuff.Span);
+                    log.Debug($"[{nameof(PullAgent)}.{nameof(SyncRecvAsync)}](Location: {this.Location}, Name: {this.Name}) typeHex: {typeHex:X8}, jsonLen: {jsonLen} ({jsonLen:X4}), json:\n{jsonStr}\n[\n{jsonHex}\n]");
+                }
+                finally
+                { }
 #endif
-                return Result.Ok((typeHex, (ReadOnlyMemory<byte>)msgBuff));
+                return Result.Ok((typeHex, (ReadOnlyMemory<byte>)jsonBuff));
             }
             catch (Exception e)
             {
@@ -140,11 +140,56 @@ namespace RpcPeerComSdk.Mar07
             }
         }
 
-        internal InputProxy<byte> SourceInput
-            => this.input_;
+        private static Lazy<SemaphoreSlim> lazyTypeDictSema_ = new(() => new SemaphoreSlim(1, 1));
 
-        internal IDeserializer<TItem> GetDeserializer<TItem>(IUnbufferedInput<byte> input)
-            => throw new NotImplementedException();
+        private static readonly Dictionary<uint, Type> typeDict_ = new();
+
+        internal static async Task<Result<Type, Dictionary<uint, Type>>> FindTypeWithBaseAndHexAsync(Type apiType, uint hexCode)
+        {
+            const string ASM_PREFIX = "LiquidRainbow";
+            var log = Logger.Shared;
+            var typeDictSema = lazyTypeDictSema_.Value;
+            try
+            {
+                await typeDictSema.WaitAsync();
+                while (true)
+                {
+                    if (PullAgent.typeDict_.TryGetValue(hexCode, out var dstType))
+                        return Result.Ok(dstType);
+
+                    if (PullAgent.typeDict_.Count > 0)
+                        break;
+
+                    var assemblies =
+                        from a in AppDomain.CurrentDomain.GetAssemblies()
+                        where a.FullName.StartsWith(ASM_PREFIX)
+                        select a;
+                    var types =
+                        from asm in assemblies
+                        from t in asm.GetTypes()
+                        where apiType.IsAssignableFrom(t)
+                        select t;
+
+                    if (!types.Any())
+                        throw new Exception($"No data types found matching {apiType.FullName}");
+
+                    foreach (Type t in types)
+                    {
+                        var key = t.FullName.GetStableHashCode();
+                        if (PullAgent.typeDict_.TryAdd(key, t))
+                            log.Info($"Added type({t.FullName}) with key: {key:X8}");
+                        else
+                            log.Error($"Failed adding type({t.FullName}) with key: {key:X8}");
+                    }
+                }
+                return Result.Err(typeDict_);
+            }
+            finally
+            {
+                if (typeDictSema.CurrentCount == 0)
+                    typeDictSema.Release();
+            }
+        }
 
         public UniTask<Result<RxProxy<byte>, PullError>> RecvAsync(CancellationToken token = default)
             => throw new NotImplementedException();
@@ -166,7 +211,7 @@ namespace RpcPeerComSdk.Mar07
 
         private readonly Task rxloop_;
 
-        private readonly AsyncMutex mutex_;
+        private readonly SemaphoreSlim sema_;
 
         public PullAgent(
             InputProxy<byte> input,
@@ -183,7 +228,7 @@ namespace RpcPeerComSdk.Mar07
             this.items_ = createBuffer();
             this.cts_ = new CancellationTokenSource();
             this.rxloop_ = this.RxLoopAsync_();
-            this.mutex_ = new();
+            this.sema_ = new SemaphoreSlim(1, 1);
         }
 
         public Uri Location
@@ -216,8 +261,8 @@ namespace RpcPeerComSdk.Mar07
                         throw pullError.AsException();
 
                     var (typeHex, jsonHex) = buff;
-                    var findTypeResult = await PullAgent<TItem>.FindTypeWithHexAsync(typeHex);
-                    if (!findTypeResult.TryOk(out var dstType, out var cachedTypes))
+                    var maybeType = await PullAgent.FindTypeWithBaseAndHexAsync(typeof(TItem), typeHex);
+                    if (!maybeType.TryOk(out var dstType, out var cachedTypes))
                     {
                         log.Warn($"[{nameof(PullAgent<TItem>)}.{nameof(RxLoopAsync_)}](items_: {this.items_.GetHashCode():X8}, Location: {this.baseAgent_.Location}) cannot find type with typeHex({typeHex:X8}).");
                         foreach (var kv in cachedTypes)
@@ -225,10 +270,14 @@ namespace RpcPeerComSdk.Mar07
                         throw new Exception($"No types found with typeHex({typeHex:X8})");
                     }
 
-                    var des = this.baseAgent_.GetDeserializer<TItem>(this.baseAgent_.SourceInput);
-                    var deserializeRes = await des.DeserializeAsync(token);
-                    if (!deserializeRes.TryOk(out var item, out var desErr))
-                        throw desErr.AsException();
+                    var jsonStr = Encoding.UTF8.GetString(jsonHex.Span);
+                    log.Debug($"[{nameof(PullAgent<TItem>)}.{nameof(RxLoopAsync_)}](items_: {this.items_.GetHashCode():X8}, Location: {this.baseAgent_.Location}) recv typeHex({typeHex:X8}), jsonStr({jsonStr})");
+
+                    var obj = JsonConvert.DeserializeObject(jsonStr, dstType, PullConfig.DemoDefaultSettings);
+                    if (obj is null)
+                        throw new Exception($"Deserialized item is expected to be \"{typeof(TItem)}\" but got null");
+                    if (obj is not TItem item)
+                        throw new Exception($"Deserialized item is expected to be \"{typeof(TItem)}\" but got \"{obj.GetType().FullName}\"");
 
                     var writeSucc = itemQueueTx.TryWrite(item);
                     if (!writeSucc)
@@ -255,10 +304,9 @@ namespace RpcPeerComSdk.Mar07
 
         public async UniTask<Result<TItem, PullError>> DequeueAsync(CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
             try
             {
-                optGuard = await this.mutex_.AcquireAsync(token);
+                await this.sema_.WaitAsync(token);
                 var itemQueueRx = this.items_.Reader;
                 var maybeItem = await itemQueueRx.ReadAsync(token);
                 if (maybeItem is not TItem item)
@@ -267,8 +315,8 @@ namespace RpcPeerComSdk.Mar07
             }
             finally
             {
-                if (optGuard.IsSome(out var guard))
-                    guard.Dispose();
+                if (this.sema_.CurrentCount == 0)
+                    this.sema_.Release();
             }
         }
 
@@ -277,53 +325,6 @@ namespace RpcPeerComSdk.Mar07
             var x = await this.DequeueAsync(token);
             return x.MapErr(e => (IPullError)e);
         }
-
-        private static Lazy<AsyncMutex> lazyTypeDictMutex_ = new(() => new AsyncMutex());
-
-        private static readonly Dictionary<uint, Type> typeDict_ = new();
-
-        private static async Task<Result<Type, Dictionary<uint, Type>>> FindTypeWithHexAsync(uint hexCode)
-        {
-            const string ASM_PREFIX = "LiquidRainbow";
-            var log = Logger.Shared;
-            var typeDictMutex = lazyTypeDictMutex_.Value;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
-            try
-            {
-                optGuard = await typeDictMutex.AcquireAsync();
-                while (true)
-                {
-                    if (PullAgent<TItem>.typeDict_.TryGetValue(hexCode, out var dstType))
-                        return Result.Ok(dstType);
-
-                    if (PullAgent<TItem>.typeDict_.Count > 0)
-                        break;
-
-                    var assemblies =
-                        from a in AppDomain.CurrentDomain.GetAssemblies()
-                        where a.FullName.StartsWith(ASM_PREFIX)
-                        select a;
-                    var types =
-                        from asm in assemblies
-                        from t in asm.GetTypes()
-                        where typeof(TItem).IsAssignableFrom(t)
-                        select t;
-                    foreach (Type t in types)
-                    {
-                        var key = t.FullName.GetStableHashCode();
-                        if (PullAgent<TItem>.typeDict_.TryAdd(key, t))
-                            log.Info($"Added type({t.FullName}) with key: {key:X8}");
-                        else
-                            log.Error($"Failed adding type({t.FullName}) with key: {key:X8}");
-                    }
-                }
-                return Result.Err(PullAgent<TItem>.typeDict_);
-            }
-            finally
-            {
-                if (optGuard.IsSome(out var guard))
-                    guard.Dispose();
-            }
-        }
     }
+
 }

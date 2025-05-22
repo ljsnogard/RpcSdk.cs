@@ -1,8 +1,10 @@
 namespace ServerDemo.ServerTestings.Mar07
 {
     using System;
+    using System.Linq;
     using System.Net;
     using System.Net.Sockets;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
 
@@ -15,13 +17,9 @@ namespace ServerDemo.ServerTestings.Mar07
     using BufferKit;
 
     using RpcPeerComSdk;
-    using RpcPeerComSdk.Mar07;
+    using RpcClientSdk.Mar07;
 
     using LiquidRainbow.Mar07;
-    using System.Linq;
-    using System.Collections.Generic;
-    using System.Text;
-    using Serilog;
 
     public sealed class ClientParameters
     {

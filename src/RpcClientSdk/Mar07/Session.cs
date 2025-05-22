@@ -1,4 +1,4 @@
-namespace RpcPeerComSdk.Mar07
+namespace RpcClientSdk.Mar07
 {
     using System;
     using System.IO;
