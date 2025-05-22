@@ -82,6 +82,16 @@ namespace SerdesKit
         /// </summary>
         private readonly ReadOnlyMemory<(string, ConcreteSerdesTypeContext)> fields_;
 
+        public static UniTask<Option<ConcreteSerdesTypeContext>> FindContextForTypeAsync<T>(CancellationToken token = default)
+            => ConcreteSerdesTypeContext.GetGlobalCtxCache().FindWithTypeAsync(typeof(T), token);
+
+        public static UniTask<Option<FnAcceptVisitorAsync<T, F, V>>> FindAcceptFnAsync<T, F, V>(CancellationToken token = default)
+            where F: IVisitorFactory<T, V>
+            where V: IVisitor<T>
+        {
+            throw new NotImplementedException();
+        }
+
         public ConcreteSerdesTypeContext(
             Type dataType,
             uint typeHex,
