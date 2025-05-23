@@ -43,10 +43,7 @@ namespace BufferKit
                 return new(input, DoNothingWithInput);
         }
 
-        public static InputProxy<T> CreateProxy<I>
-            ( I input
-            , Action<I> closeOnDispose
-            )
+        public static InputProxy<T> CreateProxy<I>(I input, Action<I> closeOnDispose)
             where I : class, IUnbufferedInput<T>
         {
             void WrappedCloseOnDispose_(IUnbufferedInput<T> input)
@@ -105,7 +102,8 @@ namespace BufferKit
             var readCount = NUsize.Zero;
             try
             {
-                while (readCount < target.NUsizeLength())
+                var targetLen = target.NUsizeLength();
+                while (readCount < targetLen)
                 {
                     var dst = target.Slice(offset: readCount);
                     var readRes = await this.input_.ReadAsync(dst, token);

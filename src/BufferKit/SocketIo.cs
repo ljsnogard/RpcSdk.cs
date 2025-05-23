@@ -13,8 +13,38 @@ namespace BufferKit
 
     public readonly struct SocketIoError : IIoError
     {
+        private readonly Result<uint, SocketError> data_;
+
+        public SocketIoError(uint errCode)
+            => this.data_ = Result.Ok(errCode);
+
+        public SocketIoError(SocketError err)
+            => this.data_ = Result.Err(err);
+
+        public Result<uint, SocketError> Data
+            => this.data_;
+
         public Exception AsException()
-            => throw new NotImplementedException();
+        {
+            if (this.data_.TryOk(out var errCode, out var sockErr))
+            {
+                var m = errCode switch
+                {
+                    ERR_CLOSED => nameof(ERR_CLOSED),
+                    ERR_DISPOSED => nameof(ERR_DISPOSED),
+                    _ => "Unknown",
+                };
+                return new Exception(m);
+            }
+            else
+            {
+                return new Exception(sockErr.ToString());
+            }
+        }
+
+        public const uint ERR_CLOSED = 0;
+
+        public const uint ERR_DISPOSED = 1;
     }
 
     public abstract class SocketIo
@@ -124,11 +154,14 @@ namespace BufferKit
     {
         private readonly AsyncMutex mutex_;
 
+        private bool isClosed_;
+
         private bool isDisposed_;
 
         internal SocketInput(Socket socket) : base(socket)
         {
             this.mutex_ = new();
+            this.isClosed_ = false;
             this.isDisposed_ = false;
         }
 
@@ -139,47 +172,63 @@ namespace BufferKit
             Memory<byte> target,
             CancellationToken token = default)
         {
+            var log = Logger.Shared;
             if (this.isDisposed_)
-                throw new Exception($"[{nameof(SocketInput)}.{nameof(ReadAsync)}] SocketInput({this.GetHashCodeStrX8()}) is disposed.");
-            var acqRes = await this.mutex_.AcquireAsync(token);
-            if (!acqRes.IsSome(out var guard))
-                throw new Exception();
+                throw new Exception($"[{nameof(SocketInput)}.{nameof(ReadAsync)}] this ({this.GetHashCodeStrX8()}) is disposed.");
+
+            if (this.isClosed_)
+                return Result.Err(new SocketIoError(SocketIoError.ERR_CLOSED));
+
+            Option<AsyncMutex.Guard> optGuard = Option.None;
+            NUsize recvSize = NUsize.Zero;
             try
             {
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    return Result.Ok(recvSize);
+
                 var tcs = new TaskCompletionSource<NUsize>();
                 using var args = new SocketAsyncEventArgs();
 
                 args.SetBuffer(target);
                 args.Completed += (s, e) => SocketIo.HandleSocketWithEvent_(s, e, tcs);
-                NUsize recvSize;
+
                 if (!this.Socket.ReceiveAsync(args))
                     recvSize = (NUsize)args.BytesTransferred;
                 else
                     recvSize = await tcs.Task.AttachExternalCancellation(token);
+
+                if (recvSize == NUsize.Zero)
+                    this.isClosed_ = true;
 #if DEBUG
                 try
                 {
                     var sentMem = target.Slice(0, args.BytesTransferred);
                     var jsonStr = System.Text.Encoding.UTF8.GetString(sentMem.Span);
                     var hexBuilder = new System.Text.StringBuilder();
-                    for(var i = 0; i < sentMem.Length; ++i)
+                    for (var i = 0; i < sentMem.Length; ++i)
                         hexBuilder.Append($"{sentMem.Span[i]:X2} ");
 
-                    Logger.Shared.Debug($"[{nameof(SocketInput)}.{nameof(ReadAsync)}](l: {this.LocalEndPoint}, r: {this.RemoteEndPoint}) recv {recvSize} bytes, cont: \n{jsonStr}\n{hexBuilder}\n");
+                    log.Debug($"[{nameof(SocketInput)}.{nameof(ReadAsync)}](l: {this.LocalEndPoint}, r: {this.RemoteEndPoint}) recv {recvSize} bytes, cont: \n{jsonStr}\n{hexBuilder}\n");
                 }
                 finally
                 { }
 #endif
                 return Result.Ok(recvSize);
             }
+            catch (OperationCanceledException)
+            {
+                return Result.Ok(recvSize);
+            }
             catch (Exception e)
             {
-                Logger.Shared.Debug($"[{nameof(SocketInput)}.{nameof(ReadAsync)}](l: {this.LocalEndPoint}, r: {this.RemoteEndPoint}) exception: {e} {e.Message}");
+                log.Debug($"[{nameof(SocketInput)}.{nameof(ReadAsync)}](l: {this.LocalEndPoint}, r: {this.RemoteEndPoint}) exception: {e} {e.Message}");
                 throw;
             }
             finally
             {
-                guard.Dispose();
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
             }
         }
 
@@ -225,6 +274,8 @@ namespace BufferKit
     {
         private readonly AsyncMutex mutex_;
 
+        private bool isClosed_;
+
         private bool isDisposed_;
 
         internal SocketOutput(Socket socket) : base(socket)
@@ -240,11 +291,21 @@ namespace BufferKit
             ReadOnlyMemory<byte> source,
             CancellationToken token = default)
         {
-            var acqRes = await this.mutex_.AcquireAsync(token);
-            if (!acqRes.IsSome(out var guard))
-                throw new Exception();
+            var log = Logger.Shared;
+            if (this.isDisposed_)
+                throw new Exception($"[{nameof(SocketInput)}.{nameof(WriteAsync)}] this ({this.GetHashCodeStrX8()}) is disposed.");
+
+            if (this.isClosed_)
+                return Result.Err(new SocketIoError(SocketIoError.ERR_CLOSED));
+
+            Option<AsyncMutex.Guard> optGuard = Option.None;
+            NUsize sentSize = NUsize.Zero;
             try
             {
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    return Result.Ok(sentSize);
+
                 var tcs = new TaskCompletionSource<NUsize>();
                 using var args = new SocketAsyncEventArgs();
 
@@ -258,41 +319,49 @@ namespace BufferKit
                 args.Completed += (s, e) => SocketIo.HandleSocketWithEvent_(s, e, tcs);
 
                 // Send
-                NUsize sentSize;
+
                 if (!this.Socket.SendAsync(args))
                     sentSize = (NUsize)args.BytesTransferred;
                 else
                     sentSize = await tcs.Task.AttachExternalCancellation(token);
+
+                if (sentSize == NUsize.Zero)
+                    this.isClosed_ = true;
 #if DEBUG
                 try
                 {
                     var recvCont = buffer.Slice(0, args.BytesTransferred);
                     var jsonStr = System.Text.Encoding.UTF8.GetString(recvCont.Span);
                     var hexBuilder = new System.Text.StringBuilder();
-                    for(var i = 0; i < recvCont.Length; ++i)
+                    for (var i = 0; i < recvCont.Length; ++i)
                         hexBuilder.Append($"{recvCont.Span[i]:X2} ");
 
-                    Logger.Shared.Debug($"[{nameof(SocketOutput)}.{nameof(WriteAsync)}](l: {this.LocalEndPoint}, r: {this.RemoteEndPoint}) sent {sentSize} bytes, cont:\n{jsonStr}\n{hexBuilder}\n");
+                    log.Debug($"[{nameof(SocketOutput)}.{nameof(WriteAsync)}](l: {this.LocalEndPoint}, r: {this.RemoteEndPoint}) sent {sentSize} bytes, cont:\n{jsonStr}\n{hexBuilder}\n");
                 }
                 finally
                 { }
 #endif
                 return Result.Ok(sentSize);
             }
+            catch (OperationCanceledException)
+            {
+                return Result.Ok(sentSize);
+            }
             catch (Exception e)
             {
-                Logger.Shared.Debug($"[{nameof(SocketOutput)}.{nameof(WriteAsync)}] exception: {e} {e.Message}");
+                log.Debug($"[{nameof(SocketOutput)}.{nameof(WriteAsync)}] {e}");
                 throw;
             }
             finally
             {
-                guard.Dispose();
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
             }
         }
 
-        async UniTask<Result<NUsize, IIoError>> IUnbufferedOutput<byte>.WriteAsync(
-            ReadOnlyMemory<byte> source,
-            CancellationToken token)
+        async UniTask<Result<NUsize, IIoError>> IUnbufferedOutput<byte>.WriteAsync
+            ( ReadOnlyMemory<byte> source
+            , CancellationToken token)
         {
             var x = await this.WriteAsync(source, token);
             return x.MapErr(e => (IIoError)e);
