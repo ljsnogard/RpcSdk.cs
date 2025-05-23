@@ -1,9 +1,6 @@
 ﻿namespace RpcMuxSdk
 {
     using System;
-    using System.Threading;
-
-    using Cysharp.Threading.Tasks;
 
     using BufferKit;
 
@@ -30,6 +27,9 @@
             else
                 return a;
         }
+
+        public override string ToString()
+            => $"{nameof(ChannelId)}(l: {this.LocalPort.code}, r: {this.RemotePort.code})";
 
         public override int GetHashCode()
             => HashCode.Combine(this.LocalPort, this.RemotePort);

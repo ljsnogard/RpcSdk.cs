@@ -1,21 +1,31 @@
 namespace RpcPeerComSdk.Jun10
 {
     using System;
+    using System.Buffers.Binary;
+    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Net;
     using System.Net.Sockets;
     using System.Threading;
-
-    using Cysharp.Threading.Tasks;
+    using System.Threading.Tasks;
 
     using BufferKit;
 
+    using Cysharp.Threading.Tasks;
+
+    using LoggingSdk;
+
     using RpcMuxSdk;
-    using RpcPeerComSdk;
-    using System.Threading.Tasks;
 
     public readonly struct ConnectionError
     { }
+
+    public static class StdHeader
+    {
+        public static readonly string K_TYPE_HEX_HEADER_KEY = "typeHex";
+
+        public static readonly string K_MSG_SIZE_HEADER_KEY = "msgSize";
+    }
 
     public sealed class DemoConnection
     {
@@ -29,11 +39,17 @@ namespace RpcPeerComSdk.Jun10
 
         private readonly AsyncMutex outputMutex_;
 
-        private readonly SortedDictionary<ChannelId, SessionInfo> sessionDict_;
+        private readonly Cysharp.Threading.Tasks.Channel<CachedSessMsg> msgCache_;
+
+        private readonly LocalPortManager localPortMgr_;
+
+        private readonly SessionManager sessMgr_;
+
+        private readonly CancellationTokenSource gracefulShutdown_;
 
         private readonly IApiTypeBind apiTypeBind_;
 
-        private readonly CancellationTokenSource gracefulShutdown_;
+        private Task? rxLoopTask_;
 
         public DemoConnection(Socket socket, IApiTypeBind apiTypeBind)
         {
@@ -44,9 +60,29 @@ namespace RpcPeerComSdk.Jun10
             this.output_ = output;
             this.inputMutex_ = new();
             this.outputMutex_ = new();
-            this.sessionDict_ = new();
+
+            this.msgCache_ = Cysharp.Threading.Tasks.Channel.CreateSingleConsumerUnbounded<CachedSessMsg>();
+            this.localPortMgr_ = new LocalPortManager();
+            this.sessMgr_ = new SessionManager();
+
             this.apiTypeBind_ = apiTypeBind;
             this.gracefulShutdown_ = new CancellationTokenSource();
+            this.rxLoopTask_ = null;
+        }
+
+        /// <summary>
+        /// 创建一个新的会话
+        /// </summary>
+        /// <param name="remotePort"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        public async UniTask<Option<(SessionTx, SessionRx)>> NewSessionAsync(Port remotePort, CancellationToken token = default)
+        {
+            var optPort = await this.localPortMgr_.AllocateAsync(token);
+            if (!optPort.IsSome(out var localPort))
+                return Option.None;
+
+            throw new NotImplementedException();
         }
 
         internal IApiTypeBind ApiTypeBind
@@ -74,13 +110,269 @@ namespace RpcPeerComSdk.Jun10
             return new(socket, apiTypeBind);
         }
 
-        private async UniTask TxLoopAsync_()
+        private async ValueTask NotifyRxClosed_()
         {
-            var token = this.gracefulShutdown_.Token;
-            while (true)
-            {
+            await Task.CompletedTask;
+        }
 
+        private async ValueTask NotifyGracefulShutDownAsync_()
+        {
+            await Task.CompletedTask;
+        }
+
+        private async Task RxLoopAsync_()
+        {
+            var log = Logger.Shared;
+            var token = this.gracefulShutdown_.Token;
+            Option<AsyncMutex.Guard> optTxMutexGuard = Option.None;
+
+            Memory<byte> sessionHeaderSpan = new byte[10];
+            Memory<byte> localPortSpan = sessionHeaderSpan.Slice(start: 0, length: 4);
+            Memory<byte> remotePortSpan = sessionHeaderSpan.Slice(start: 4, length: 4);
+            Memory<byte> msgFlagSpan = sessionHeaderSpan.Slice(start: 8, length: 2);
+            Memory<byte> msgSizeSpan = sessionHeaderSpan.Slice(start: 10, length: 2);
+
+            var localEp = this.socket_.LocalEndPoint;
+            var remoteEp = this.socket_.RemoteEndPoint;
+            try
+            {
+                while (true)
+                {
+                    if (token.IsCancellationRequested)
+                        break;
+
+                    var optHeaderSize = await this.input_.ReadAsync(sessionHeaderSpan, token);
+                    if (!optHeaderSize.TryOk(out var readSize, out var socketIoErr))
+                    {
+                        if (socketIoErr.Data.TryOk(out var errCode, out var socketErr))
+                        {
+                            if (errCode == SocketIoError.ERR_CLOSED)
+                            {
+                                await this.NotifyRxClosed_();
+                                break;
+                            }
+                        }
+                        throw socketIoErr.AsException();
+                    }
+                    if (readSize != sessionHeaderSpan.NUsizeLength())
+                    {
+                        var m = "Read session header: insufficient data len: {readSize}";
+                        throw new Exception(m);
+                    }
+
+                    var localPort = BinaryPrimitives.ReadUInt32BigEndian(localPortSpan.Span);
+                    var remotePort = BinaryPrimitives.ReadUInt32BigEndian(remotePortSpan.Span);
+                    var u16MsgSize = BinaryPrimitives.ReadUInt16BigEndian(msgSizeSpan.Span);
+
+                    Memory<byte> msgCont = new byte[u16MsgSize];
+                    var optReadMsgSize = await this.input_.ReadAsync(msgCont, token);
+                    if (!optReadMsgSize.TryOk(out var readMsgSize, out socketIoErr))
+                    {
+                        if (socketIoErr.Data.TryOk(out var errCode, out var socketErr))
+                        {
+                            if (errCode == SocketIoError.ERR_CLOSED)
+                            {
+                                await this.NotifyRxClosed_();
+                                break;
+                            }
+                        }
+                        throw socketIoErr.AsException();
+                    }
+                    IEnumerable<ReadOnlyMemory<byte>> cont = new[] { (ReadOnlyMemory<byte>)msgCont };
+                    var msg = new SessionMessage(cont);
+                    var chanId = new ChannelId(localPort, remotePort);
+                    var cachedMsg = new CachedSessMsg(chanId, msg);
+
+                    /// 将接收到的报文放入待处理队列
+                    while (true)
+                    {
+                        if (token.IsCancellationRequested)
+                            break;
+                        if (this.msgCache_.Writer.TryWrite(cachedMsg))
+                            break;
+                        else
+                            log.Warn("failed to enqueue CachedSessMsg");
+                    }
+                }
             }
+            catch (Exception e)
+            {
+                log.Error($"[{nameof(DemoConnection)}.{nameof(RxLoopAsync_)}] (l: {localEp}, r: {remoteEp}) {e}");
+                throw;
+            }
+            finally
+            {
+                await this.NotifyGracefulShutDownAsync_();
+            }
+        }
+
+        private async Task ConsumeCachedMsgAsync_()
+        {
+            var log = Logger.Shared;
+        }
+    }
+
+    internal readonly struct MessageFlags
+    {
+        public readonly ushort Value;
+
+        public MessageFlags(ushort v)
+            => this.Value = v;
+
+        public static MessageFlags Build
+            (bool fin
+            , bool syn
+            , bool rst
+            , bool ack)
+        {
+            
+        }
+    }
+
+    internal readonly struct CachedSessMsg
+    {
+        public readonly Port LocalPort;
+
+        public readonly Port RemotePort;
+
+        public readonly MessageFlags MsgFlag;
+
+        public readonly ushort MsgSize;
+
+        public readonly SessionMessage Message;
+
+        public CachedSessMsg
+            (Port localPort
+            , Port remotePort
+            , ushort msgFlag
+            , ushort msgSize
+            , SessionMessage message)
+        {
+            this.LocalPort = localPort;
+            this.RemotePort = remotePort;
+            this.MsgFlag = new(msgFlag);
+            this.MsgSize = msgSize;
+            this.Message = message;
+        }
+    }
+
+    internal sealed class LocalPortManager
+    {
+        private readonly AsyncMutex mutex_;
+
+        private readonly Queue<Port> idlePorts_;
+
+        private readonly SortedDictionary<Port, ChannelId> activePorts_;
+
+        private Port nextPort_;
+
+        public static Port StartPort
+            => 1025u;
+
+        public LocalPortManager()
+        {
+            this.mutex_ = new AsyncMutex();
+            this.idlePorts_ = new();
+            this.activePorts_ = new();
+            this.nextPort_ = StartPort;
+        }
+
+        public async UniTask<Option<Port>> AllocateAsync(CancellationToken token = default)
+        {
+            Option<AsyncMutex.Guard> optGuard = Option.None;
+            try
+            {
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    return Option.None;
+
+                if (this.idlePorts_.Count != 0)
+                {
+                    var port = this.idlePorts_.Dequeue();
+                    return Option.Some(port);
+                }
+                while (true)
+                {
+                    if (this.activePorts_.ContainsKey(this.nextPort_))
+                    {
+                        this.nextPort_ = new Port(this.nextPort_.code + 1u);
+                        if (token.IsCancellationRequested)
+                            return Option.None;
+                        else
+                            continue;
+                    }
+                    var res = this.nextPort_;
+                    this.nextPort_ = new Port(this.nextPort_.code + 1u);
+                    return Option.Some(res);
+                }
+            }
+            finally
+            {
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
+            }
+        }
+
+        public async UniTask<Option<ChannelId>> FindChannelId(Port localPort, CancellationToken token = default)
+        {
+            Option<AsyncMutex.Guard> optGuard = Option.None;
+            try
+            {
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    return Option.None;
+                if (!this.activePorts_.TryGetValue(localPort, out var chanId))
+                    return Option.None;
+
+                if (chanId.LocalPort != localPort)
+                    throw new Exception($"Err port bind: chanId.LocalPort({chanId.LocalPort}), query({localPort})");
+
+                return Option.Some(chanId);
+            }
+            finally
+            {
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
+            }
+        }
+
+        public async UniTask<Option<Port>> ExpireAsync(Port port, CancellationToken token = default)
+        {
+            Option<AsyncMutex.Guard> optGuard = Option.None;
+            try
+            {
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    return Option.None;
+                if (!this.activePorts_.TryGetValue(port, out var chanId))
+                    return Option.None;
+                if (!this.activePorts_.Remove(port))
+                    throw new Exception($"port {port.code} is not active.");
+
+                this.idlePorts_.Enqueue(port);
+                return Option.Some(chanId.RemotePort);
+            }
+            finally
+            {
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
+            }
+        }
+    }
+
+    internal sealed class SessionManager
+    {
+        private readonly AsyncMutex mutex_;
+
+        private readonly SortedDictionary<ChannelId, SessionInfo> sessionDict_;
+
+        private readonly Queue<DemoSession> idleSessions_;
+
+        public SessionManager()
+        {
+            this.mutex_ = new AsyncMutex();
+            this.sessionDict_ = new();
+            this.idleSessions_ = new();
         }
     }
 
@@ -94,11 +386,15 @@ namespace RpcPeerComSdk.Jun10
 
         public const int ST_EXPIRED = 3;
 
+        private readonly AsyncMutex infoMutex_;
+
         private readonly DemoSession session_;
 
         private readonly AsyncMutex connTxMutex_;
 
         private readonly OutputProxy<byte> connTx_;
+
+        private readonly CancellationTokenSource gracefulShutdown_;
 
         private int status_;
 
@@ -113,18 +409,97 @@ namespace RpcPeerComSdk.Jun10
         public DateTimeOffset LastActive { get; private set; }
 
         public SessionInfo
-            ( DemoSession session
+            (DemoSession session
             , AsyncMutex txMutex
             , OutputProxy<byte> tx
             , int status)
         {
+            this.infoMutex_ = new AsyncMutex();
             this.session_ = session;
             this.connTxMutex_ = txMutex;
             this.connTx_ = tx;
+            this.gracefulShutdown_ = new CancellationTokenSource();
 
             this.status_ = status;
-            this.LastActive = DateTimeOffset.Now;
+            this.LastActive = DateTimeOffset.MinValue;
             this.txLoopTask_ = null;
+        }
+
+        public async UniTask<bool> StartSessionAsync(CancellationToken token = default)
+        {
+            Option<AsyncMutex.Guard> optGuard = Option.None;
+            try
+            {
+                optGuard = await this.infoMutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    return false;
+
+                if (this.txLoopTask_ is not null)
+                    return false;
+
+                this.txLoopTask_ = this.TxLoopAsync_();
+                this.LastActive = DateTimeOffset.Now;
+                return true;
+            }
+            finally
+            {
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
+            }
+        }
+
+        private async Task TxLoopAsync_()
+        {
+            var token = this.gracefulShutdown_.Token;
+            Option<AsyncMutex.Guard> optTxMutexGuard = Option.None;
+
+            Memory<byte> sessionHeaderSpan = new byte[10];
+
+            Memory<byte> localPortSpan = sessionHeaderSpan.Slice(start: 0, length: 4);
+            Memory<byte> remotePortSpan = sessionHeaderSpan.Slice(start: 4, length: 4);
+            Memory<byte> msgSizeSpan = sessionHeaderSpan.Slice(start: 8);
+            try
+            {
+                while (true)
+                {
+                    var optMsg = await this.session_.DequeueOutboundAsync(token);
+                    if (!optMsg.IsSome(out var msg))
+                        continue;
+
+                    if (!msg.Size.TryInto(out ushort u16size))
+                        throw new Exception();
+
+                    optTxMutexGuard = await this.connTxMutex_.AcquireAsync(token);
+                    if (!optTxMutexGuard.IsSome(out var txGuard))
+                    {
+                        if (token.IsCancellationRequested)
+                            break;
+                        else
+                            continue;
+                    }
+                    BinaryPrimitives.WriteUInt32BigEndian(localPortSpan.Span, this.session_.LocalPort.code);
+                    BinaryPrimitives.WriteUInt32BigEndian(remotePortSpan.Span, this.session_.RemotePort.code);
+                    BinaryPrimitives.WriteUInt16BigEndian(msgSizeSpan.Span, u16size);
+
+                    await this.connTx_.WriteAsync(sessionHeaderSpan, Option.None, default);
+                    var msgLenWritten = NUsize.Zero;
+                    foreach (var segm in msg.Cont)
+                    {
+                        await this.connTx_.WriteAsync(segm, Option.None, default);
+                        msgLenWritten += segm.NUsizeLength();
+                        if (msgLenWritten >= ushort.MaxValue)
+                            break;
+                    }
+
+                    txGuard.Dispose();
+                    optTxMutexGuard = Option.None;
+                }
+            }
+            finally
+            {
+                if (optTxMutexGuard.IsSome(out var txGuard))
+                    txGuard.Dispose();
+            }
         }
     }
 }

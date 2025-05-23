@@ -43,7 +43,7 @@ namespace RpcPeerComSdk.Jun10
 
     public sealed class PushAgent : IPushAgent
     {
-        private readonly OutputProxy<byte> output_;
+        private readonly SessionTx sessionTx_;
 
         private readonly Uri location_;
 
@@ -51,9 +51,9 @@ namespace RpcPeerComSdk.Jun10
 
         private readonly string name_;
 
-        public PushAgent(OutputProxy<byte> output, Uri location, string name)
+        public PushAgent(SessionTx sessionTx, Uri location, string name)
         {
-            this.output_ = output;
+            this.sessionTx_ = sessionTx;
             this.location_ = location;
             this.mutex_ = new();
             this.name_ = name;
@@ -65,23 +65,41 @@ namespace RpcPeerComSdk.Jun10
         public string Name
             => this.name_;
 
-        internal OutputProxy<byte> Output
-            => this.output_;
-
         internal AsyncMutex Mutex
             => this.mutex_;
 
-        internal async UniTask<Result<NUsize, PushError>> SyncSendAsync(ReadOnlyMemory<byte> source, CancellationToken token = default)
+        internal async UniTask<Result<NUsize, PushError>> SyncSendAsync
+            ( uint typeHex
+            , ReadOnlyMemory<byte> msgPayload
+            , CancellationToken token = default)
         {
             var log = Logger.Shared;
-            var acqRes = await this.mutex_.AcquireAsync(token);
-            if (!acqRes.IsSome(out var guard))
-                throw new Exception();
+
+            if (!msgPayload.NUsizeLength().TryInto(out ushort u16msgSize))
+                throw new Exception($"message size({msgPayload.Length}) invalid");
+
+            Option<AsyncMutex.Guard> optGuard = Option.None;
             try
             {
-                var x = await this.Output.WriteAsync(source, token);
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    throw new Exception();
+
+                var typeHexValBuffer = new byte[4];
+                BinaryPrimitives.WriteUInt32BigEndian(typeHexValBuffer, typeHex);
+                var msgSizeValBuffer = new byte[2];
+                BinaryPrimitives.WriteUInt16BigEndian(msgSizeValBuffer, u16msgSize);
+
+                // ReadOnlyMemory<byte> typeHexKey = Encoding.UTF8.GetBytes(StdHeader.K_TYPE_HEX_HEADER_KEY);
+                ReadOnlyMemory<byte> typeHexVal = typeHexValBuffer;
+                // ReadOnlyMemory<byte> msgSizeKey = Encoding.UTF8.GetBytes(StdHeader.K_MSG_SIZE_HEADER_KEY);
+                ReadOnlyMemory<byte> msgSizeVal = msgSizeValBuffer;
+
+                var message = new SessionMessage(new[] { typeHexVal, msgSizeVal, msgPayload });
+                ReadOnlyMemory<SessionMessage> msg = new[] { message };
+                var x = await this.sessionTx_.WriteAsync(msg, token);
                 if (x.TryOk(out var len, out var ioErr))
-                    Logger.Shared.Debug($"[{nameof(PushAgent)}.{nameof(SyncSendAsync)}](Name: {this.Name}) sent msg {len} bytes");
+                    log.Debug($"[{nameof(PushAgent)}.{nameof(SyncSendAsync)}](Name: {this.Name}) sent msg {message.Size} bytes, typeHex({typeHex})");
 
                 return x.MapErr(buffIoErr => new PushError(buffIoErr));
             }
@@ -92,7 +110,8 @@ namespace RpcPeerComSdk.Jun10
             }
             finally
             {
-                guard.Dispose();
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
             }
         }
 
@@ -110,15 +129,15 @@ namespace RpcPeerComSdk.Jun10
     {
         private readonly PushAgent baseAgent_;
 
-        private readonly SemaphoreSlim sema_;
+        private readonly AsyncMutex mutex_;
 
-        public PushAgent(OutputProxy<byte> output, Uri location, string name) : this(new(output, location, name))
+        public PushAgent(SessionTx sessionTx, Uri location, string name) : this(new(sessionTx, location, name))
         { }
 
         public PushAgent(PushAgent baseAgent)
         {
             this.baseAgent_ = baseAgent;
-            this.sema_ = new(1, 1);
+            this.mutex_ = new();
         }
 
         public Uri Location
@@ -135,9 +154,10 @@ namespace RpcPeerComSdk.Jun10
             if (item is not TItem)
                 throw new ArgumentNullException(paramName: nameof(item));
 
+            Option<AsyncMutex.Guard> optGuard = Option.None;
             try
             {
-                await this.sema_.WaitAsync(token);
+                optGuard = await this.mutex_.AcquireAsync(token);
 
                 var typeHex = item.GetType().FullName.GetStableHashCode();
                 var jsonStr = JsonConvert.SerializeObject(item, PushConfig.DemoDefaultSettings);
@@ -146,46 +166,11 @@ namespace RpcPeerComSdk.Jun10
                 if (jsonBin.Length > ushort.MaxValue)
                     throw new Exception($"instance (type: {typeof(TItem).Name}) is too larget (size: {jsonBin.Length}) to serialize");
 
-                var prefixLen = PushConfig.TYPE_HEX_SIZE + PushConfig.JSON_BIN_SIZE;
-                var srcLen = prefixLen + jsonBin.Length;
-                var srcMem = new Memory<byte>(new byte[srcLen]);
+                var sentRes = await this.baseAgent_.SyncSendAsync(typeHex, jsonBin, token);
+                if (!sentRes.TryOk(out var len, out var err))
+                    return Result.Err<IPushError>(err);
 
-                BinaryPrimitives.WriteUInt32BigEndian(srcMem.Span, typeHex);
-                BinaryPrimitives.WriteUInt16BigEndian(srcMem.Slice(PushConfig.TYPE_HEX_SIZE, PushConfig.JSON_BIN_SIZE).Span, (ushort)jsonBin.Length);
-#if DEBUG
-                // try
-                // {
-                //     var prefixHexBuilder = new StringBuilder();
-                //     for (var i = 0; i < prefixLen; ++i)
-                //         prefixHexBuilder.Append($"{srcMem.Span[i]:X2} ");
-                //     var prefixHex = prefixHexBuilder.ToString();
-
-                //     Logger.Shared.Debug($"[{nameof(PushAgent<TItem>)}.{nameof(EnqueueAsync)}] typeHex({typeHex:X8}), jsonBin.Length({jsonBin.Length}, {jsonBin.Length:X4}), prefixHex: [\n{prefixHex}\n]");
-                // }
-                // finally
-                // { }
-#endif
-                jsonBin.CopyTo(srcMem.Slice(prefixLen, jsonBin.Length));
-
-                var maybeLen = await this.baseAgent_.SyncSendAsync(srcMem, token);
-                if (!maybeLen.TryOk(out var len, out var err))
-                    throw err.AsException();
-                if (len != (NUsize)srcMem.Length)
-                    throw new Exception($"Incomplete sent: {srcMem.Length} bytes to send but only {len} bytes done");
-
-                try
-                {
-                    var jsonHexBuilder = new StringBuilder();
-                    for (var i = 0; i < jsonBin.Length; ++i)
-                        jsonHexBuilder.Append($"{jsonBin[i]:X2} ");
-                    var jsonHex = jsonHexBuilder.ToString();
-
-                    Logger.Shared.Debug($"[{nameof(PushAgent<TItem>)}.{nameof(EnqueueAsync)}] pushed {len} bytes, jsonStr({jsonStr}), jsonHex: [\n{jsonHex}\n]");
-                }
-                finally
-                { }
-
-                return Result.Ok<NUsize>(1);
+                return Result.Ok(len);
             }
             catch (Exception e)
             {
@@ -194,8 +179,8 @@ namespace RpcPeerComSdk.Jun10
             }
             finally
             {
-                if (this.sema_.CurrentCount == 0)
-                    this.sema_.Release();
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
             }
         }
     }

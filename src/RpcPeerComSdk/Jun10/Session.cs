@@ -1,7 +1,9 @@
 namespace RpcPeerComSdk.Jun10
 {
     using System;
+    using System.Collections.Generic;
     using System.Threading;
+    using System.Threading.Tasks;
 
     using BufferKit;
 
@@ -24,13 +26,9 @@ namespace RpcPeerComSdk.Jun10
 
     internal sealed class DemoSession
     {
-        private readonly StreamInput rxInput_;
+        private readonly Cysharp.Threading.Tasks.Channel<SessionMessage> inboundQueue_;
 
-        private readonly StreamOutput rxOutput_;
-
-        private readonly StreamInput txInput_;
-
-        private readonly StreamOutput txOutput_;
+        private readonly Cysharp.Threading.Tasks.Channel<SessionMessage> outboundQueue_;
 
         private readonly AsyncMutex rxMutex_;
 
@@ -43,23 +41,17 @@ namespace RpcPeerComSdk.Jun10
         private Option<(SessionTx, SessionRx)> optExtUser_;
 
         public DemoSession
-            ( IApiTypeBind apiTypeBind
+            (IApiTypeBind apiTypeBind
             , Port localPort
             , Port remotePort
             , Stream rxStream
             , Stream txStream)
         {
-            (var rxOutput, var rxInput) = StreamIO.Split(rxStream);
-            (var txOutput, var txInput) = StreamIO.Split(txStream);
-
             this.LocalPort = localPort;
             this.RemotePort = remotePort;
 
-            this.rxInput_ = rxInput;
-            this.rxOutput_ = rxOutput;
-
-            this.txInput_ = txInput;
-            this.txOutput_ = txOutput;
+            this.inboundQueue_ = Cysharp.Threading.Tasks.Channel.CreateSingleConsumerUnbounded<SessionMessage>();
+            this.outboundQueue_ = Cysharp.Threading.Tasks.Channel.CreateSingleConsumerUnbounded<SessionMessage>();
 
             this.rxMutex_ = new();
             this.txMutex_ = new();
@@ -81,25 +73,15 @@ namespace RpcPeerComSdk.Jun10
             internal set;
         }
 
-        internal IApiTypeBind ApiTypeBind
+        public IApiTypeBind ApiTypeBind
             => this.apiTypeBind_;
-
-        /// <summary>
-        /// client 在此取出要发送的数据，这些数据已包括 localPort, RemotePort, MsgLen
-        /// </summary>
-        internal InputProxy<byte> TxInput
-            => this.txInput_.GetCachedProxy();
-
-        /// <summary>
-        /// client 在此放入已接收的数据，这些数据已去除 localPort, RemotePort, MsgLen
-        /// </summary>
-        internal OutputProxy<byte> RxOutput
-            => this.rxOutput_.GetCachedProxy();
 
         /// <summary>
         /// 接收来自远端的消息 消息内容包括可能是 Request(AccessMethod, Uri, Header, Body) 也可能是 Resp(Status, Header, Body)
         /// </summary>
-        public async UniTask<Result<NUsize, SessionIoError>> RecvAsync(Memory<byte> target, CancellationToken token = default)
+        public async UniTask<Result<NUsize, SessionIoError>> RecvAsync
+            (Memory<SessionMessage> target
+            , CancellationToken token = default)
         {
             var log = Logger.Shared;
             var recvSize = NUsize.Zero;
@@ -108,23 +90,18 @@ namespace RpcPeerComSdk.Jun10
             {
                 optGuard = await this.rxMutex_.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Result.Ok(recvSize);
+                    return Result.Ok(NUsize.Zero);
 
+                var consumer = this.inboundQueue_.Reader;
                 var targetLen = target.NUsizeLength();
                 while (true)
                 {
                     if (recvSize >= targetLen)
-                        break;
-
-                    var sizeToFill = targetLen - recvSize;
-                    var dst = target.Slice(recvSize, sizeToFill);
-                    var readRes = await this.rxInput_.ReadAsync(dst, token);
-                    if (readRes.TryOk(out var readCount, out var err))
-                        recvSize += readCount;
-                    else
-                        throw err.AsException();
+                        return Result.Ok(recvSize);
+                    var msg = await consumer.ReadAsync(token);
+                    target.Span[(int)recvSize] = await consumer.ReadAsync();
+                    recvSize += 1u;
                 }
-                return Result.Ok(recvSize);
             }
             catch (OperationCanceledException)
             {
@@ -145,7 +122,9 @@ namespace RpcPeerComSdk.Jun10
         /// <summary>
         /// 向远端发送长度已知的消息，发送前会自动加入 localPort, remotePort, 消息长度
         /// </summary>
-        public async UniTask<Result<NUsize, SessionIoError>> SendAsync(ReadOnlyMemory<byte> source, CancellationToken token = default)
+        public async UniTask<Result<NUsize, SessionIoError>> SendAsync
+            (ReadOnlyMemory<SessionMessage> source
+            , CancellationToken token = default)
         {
             var log = Logger.Shared;
             var sentSize = NUsize.Zero;
@@ -157,19 +136,22 @@ namespace RpcPeerComSdk.Jun10
                     return Result.Ok(sentSize);
 
                 var sourceLen = source.NUsizeLength();
+                Option<SessionMessage> optLastSent = Option.None;
                 while (true)
                 {
                     if (sentSize >= sourceLen)
                         break;
-
-                    var sizeToSend = sourceLen - sentSize;
-                    var src = source.Slice(sentSize, sizeToSend);
-                    var writeRes = await this.txOutput_.WriteAsync(src, token);
-                    if (writeRes.TryOk(out var writtenCount, out var err))
-                        sentSize += writtenCount;
-                    else
-                        throw err.AsException();
+                    var producer = this.outboundQueue_.Writer;
+                    var curr = source.Span[(int)sentSize];
+                    if (producer.TryWrite(curr))
+                    {
+                        sentSize += 1;
+                        optLastSent = Option.Some(curr);
+                    }
                 }
+                if (optLastSent.IsSome(out var lastSent))
+                    await lastSent.Completion.AsUniTask().AttachExternalCancellation(token);
+
                 return Result.Ok(sentSize);
             }
             catch (OperationCanceledException)
@@ -217,7 +199,7 @@ namespace RpcPeerComSdk.Jun10
         }
 
         internal async UniTask<Option<(SessionTx, SessionRx)>> ReactivateAsync
-            ( IApiTypeBind apiTypeBind
+            (IApiTypeBind apiTypeBind
             , Port localPort
             , Port remotePort
             , CancellationToken token = default)
@@ -248,9 +230,71 @@ namespace RpcPeerComSdk.Jun10
                     guard.Dispose();
             }
         }
+
+        internal async UniTask<Option<SessionMessage>> DequeueOutboundAsync(CancellationToken token = default)
+        {
+            try
+            {
+                var consumer = this.outboundQueue_.Reader;
+                var message = await consumer.ReadAsync(token);
+                return Option.Some(message);
+            }
+            catch (OperationCanceledException)
+            {
+                return Option.None;
+            }
+        }
+
+        internal async UniTask<bool> EnqueueInboundAsync(SessionMessage message, CancellationToken token = default)
+        {
+            var producer = this.inboundQueue_.Writer;
+            await UniTask.CompletedTask;
+            while (true)
+            {
+                if (token.IsCancellationRequested)
+                    return false;
+                if (producer.TryWrite(message))
+                    return true;
+            }
+        }
     }
 
-    public sealed class SessionRx : IUnbufferedInput<byte>
+    public readonly struct SessionMessage
+    {
+        public static NUsize MAX_MSG_SIZE
+            => 1u << 16;
+
+        public readonly NUsize Size;
+
+        /// <summary>
+        /// 一个消息可能使用多段数据来保存
+        /// </summary>
+        public readonly IEnumerable<ReadOnlyMemory<byte>> Cont;
+
+        private readonly TaskCompletionSource<NUsize> completion_;
+
+        public SessionMessage(IEnumerable<ReadOnlyMemory<byte>> cont)
+        {
+            var totalLen = NUsize.Zero;
+            foreach (var segm in cont)
+                totalLen += segm.NUsizeLength();
+
+            if (totalLen >= MAX_MSG_SIZE)
+                throw new Exception();
+
+            this.Size = totalLen;
+            this.Cont = cont;
+            this.completion_ = new TaskCompletionSource<NUsize>();
+        }
+
+        internal Task Completion
+            => this.completion_.Task;
+
+        internal void SetCompleted(NUsize size)
+            => this.completion_.TrySetResult(size);
+    }
+
+    public sealed class SessionRx : IUnbufferedInput<SessionMessage>
     {
         private DemoSession? session_;
 
@@ -262,7 +306,7 @@ namespace RpcPeerComSdk.Jun10
             this.mutex_ = new();
         }
 
-        public async UniTask<Result<NUsize, SessionIoError>> ReadAsync(Memory<byte> target, CancellationToken token = default)
+        public async UniTask<Result<NUsize, SessionIoError>> ReadAsync(Memory<SessionMessage> target, CancellationToken token = default)
         {
             Option<AsyncMutex.Guard> optGuard = Option.None;
             try
@@ -301,14 +345,14 @@ namespace RpcPeerComSdk.Jun10
             }
         }
 
-        async UniTask<Result<NUsize, IIoError>> IUnbufferedInput<byte>.ReadAsync(Memory<byte> target, CancellationToken token)
+        async UniTask<Result<NUsize, IIoError>> IUnbufferedInput<SessionMessage>.ReadAsync(Memory<SessionMessage> target, CancellationToken token)
         {
             var r = await this.ReadAsync(target, token);
             return r.MapErr(e => e as IIoError);
         }
     }
 
-    public sealed class SessionTx : IUnbufferedOutput<byte>
+    public sealed class SessionTx : IUnbufferedOutput<SessionMessage>
     {
         private DemoSession? session_;
 
@@ -320,7 +364,7 @@ namespace RpcPeerComSdk.Jun10
             this.mutex_ = new();
         }
 
-        public async UniTask<Result<NUsize, SessionIoError>> WriteAsync(ReadOnlyMemory<byte> source, CancellationToken token = default)
+        public async UniTask<Result<NUsize, SessionIoError>> WriteAsync(ReadOnlyMemory<SessionMessage> source, CancellationToken token = default)
         {
             Option<AsyncMutex.Guard> optGuard = Option.None;
             try
@@ -359,7 +403,7 @@ namespace RpcPeerComSdk.Jun10
             }
         }
 
-        async UniTask<Result<NUsize, IIoError>> IUnbufferedOutput<byte>.WriteAsync(ReadOnlyMemory<byte> source, CancellationToken token)
+        async UniTask<Result<NUsize, IIoError>> IUnbufferedOutput<SessionMessage>.WriteAsync(ReadOnlyMemory<SessionMessage> source, CancellationToken token)
         {
             var r = await this.WriteAsync(source, token);
             return r.MapErr(e => e as IIoError);

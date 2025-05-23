@@ -44,7 +44,7 @@ namespace RpcPeerComSdk.Jun10
 
     public sealed class PullAgent : IPullAgent
     {
-        private readonly InputProxy<byte> input_;
+        private readonly SessionRx sessionRx_;
 
         private readonly Uri location_;
 
@@ -55,12 +55,12 @@ namespace RpcPeerComSdk.Jun10
         private readonly IApiTypeBind apiTypeBind_;
 
         public PullAgent
-            ( InputProxy<byte> input
+            ( SessionRx sessionRx
             , Uri location
             , string name
             , IApiTypeBind apiTypeBind)
         {
-            this.input_ = input;
+            this.sessionRx_ = sessionRx;
             this.location_ = location;
             this.mutex_ = new();
             this.name_ = name;
@@ -79,63 +79,45 @@ namespace RpcPeerComSdk.Jun10
         internal async UniTask<Result<(uint, ReadOnlyMemory<byte>), PullError>> SyncRecvAsync(CancellationToken token = default)
         {
             var log = Logger.Shared;
-            var acqRes = await this.mutex_.AcquireAsync(token);
-            if (!acqRes.IsSome(out var guard))
-                throw new Exception();
+            Memory<SessionMessage> buffer = new SessionMessage[1];
+            Option<AsyncMutex.Guard> optGuard = Option.None;
             try
             {
-                var prefixBuffLen = PullConfig.TYPE_HEX_SIZE + PullConfig.JSON_BIN_SIZE;
-                var prefixBuffer = new Memory<byte>(new byte[prefixBuffLen]);
+                optGuard = await this.mutex_.AcquireAsync(token);
+                if (!optGuard.IsSome(out var guard))
+                    throw new Exception();
 
-                // log.Debug($"[{nameof(PullAgent)}.{nameof(SyncRecvAsync)}](Location: {this.Location}, Name: {this.Name}) before FillAsync`Memory ({prefixBuffLen} bytes)");
+                var recvRes = await this.sessionRx_.ReadAsync(buffer, token);
+                if (recvRes.TryOk(out var mc, out var sessIoErr))
+                    throw sessIoErr.AsException();
 
-                var readPrefixRes = await this.input_.ReadAsync(prefixBuffer, token);
-                if (!readPrefixRes.TryOk(out var readPrefixLen, out var readPrefixIoErr))
-                    throw readPrefixIoErr.AsException();
-                if (readPrefixLen != (NUsize)prefixBuffLen)
-                    throw new Exception($"Incomplete receive of type str Len, {prefixBuffLen} bytes needed but got {readPrefixLen}");
+                if (mc != 1)
+                    throw new Exception();
 
-                var typeHexMem = prefixBuffer.Slice(offset: 0, length: PullConfig.TYPE_HEX_SIZE);
-                var jsonLenMem = prefixBuffer.Slice(offset: PullConfig.TYPE_HEX_SIZE, length: PullConfig.JSON_BIN_SIZE);
+                var msg = buffer.Span[0];
+                if (!msg.Size.TryInto(out ushort u16ContSize))
+                    throw new Exception();
 
-                var typeHex = BinaryPrimitives.ReadUInt32BigEndian(typeHexMem.Span);
-                var jsonLen = BinaryPrimitives.ReadUInt16BigEndian(jsonLenMem.Span);
-
-#if DEBUG
-                // try
-                // {
-                //     var prefixHexBuilder = new StringBuilder();
-                //     for(var i = 0; i < prefixBuffer.Length; ++i)
-                //         prefixHexBuilder.Append($"{prefixBuffer.Span[i]:X2} ");
-                //     var prefixHex = prefixHexBuilder.ToString();
-                //     log.Debug($"[{nameof(PullAgent)}.{nameof(SyncRecvAsync)}](Location: {this.Location}, Name: {this.Name}) typeHex: {typeHex:X8}, jsonLen: {jsonLen} ({jsonLen:X4}), prefixHex: [\n{prefixHex}\n]");
-                // }
-                // finally
-                // { }
-#endif
-
-                var jsonBuff = new Memory<byte>(new byte[jsonLen]);
-                var readJsonRes = await this.input_.ReadAsync(jsonBuff, token);
-                if (!readJsonRes.TryOk(out var readJsonLen, out var readJsonIoErr))
-                    throw readJsonIoErr.AsException();
-                if (readJsonLen != (NUsize)jsonLen)
-                    throw new Exception($"Incomplete receive of msg str Len, {jsonLen} bytes needed but got {readJsonLen}");
-
-#if DEBUG
-                try
+                Memory<byte> headerAndPayloadBuff = new byte[u16ContSize];
+                var bc = 0;
+                foreach (var segm in msg.Cont)
                 {
-                    var jsonHexBuilder = new StringBuilder();
-                    for (var i = 0; i < jsonBuff.Length; ++i)
-                        jsonHexBuilder.Append($"{jsonBuff.Span[i]:X2} ");
-                    var jsonHex = jsonHexBuilder.ToString();
-
-                    var jsonStr = System.Text.Encoding.UTF8.GetString(jsonBuff.Span);
-                    log.Debug($"[{nameof(PullAgent)}.{nameof(SyncRecvAsync)}](Location: {this.Location}, Name: {this.Name}) typeHex: {typeHex:X8}, jsonLen: {jsonLen} ({jsonLen:X4}), json:\n{jsonStr}\n[\n{jsonHex}\n]");
+                    var dst = headerAndPayloadBuff.Slice(bc, segm.Length);
+                    segm.CopyTo(dst);
+                    bc += segm.Length;
                 }
-                finally
-                { }
-#endif
-                return Result.Ok((typeHex, (ReadOnlyMemory<byte>)jsonBuff));
+                if (bc != u16ContSize)
+                    throw new Exception($"unexpected cont len copied: expect({u16ContSize}), actual({bc})");
+
+                Memory<byte> typeHexSpan = headerAndPayloadBuff.Slice(start: 0, length: 4);
+                Memory<byte> msgSizeSpan = headerAndPayloadBuff.Slice(start: 4, length: 2);
+
+                var typeHex = BinaryPrimitives.ReadUInt32BigEndian(typeHexSpan.Span);
+                var msgSize = BinaryPrimitives.ReadUInt16BigEndian(msgSizeSpan.Span);
+
+                ReadOnlyMemory<byte> msgPayload = headerAndPayloadBuff.Slice(start: 6, length: msgSize);
+
+                return Result.Ok((typeHex, msgPayload));
             }
             catch (Exception e)
             {
@@ -144,7 +126,8 @@ namespace RpcPeerComSdk.Jun10
             }
             finally
             {
-                guard.Dispose();
+                if (optGuard.IsSome(out var guard))
+                    guard.Dispose();
             }
         }
 
@@ -171,14 +154,14 @@ namespace RpcPeerComSdk.Jun10
         private readonly SemaphoreSlim sema_;
 
         public PullAgent
-            ( InputProxy<byte> input
+            ( SessionRx sessionRx
             , Uri location
             , string name
             , Func<Channel<TItem>> createBuffer
             , IApiTypeBind apiTypeBind
             ) 
             : this
-                (new PullAgent(input, location, name, apiTypeBind)
+                (new PullAgent(sessionRx, location, name, apiTypeBind)
                 , createBuffer)
         { }
 
@@ -218,8 +201,8 @@ namespace RpcPeerComSdk.Jun10
                         log.Debug($"[{nameof(PullAgent<TItem>)}.{nameof(RxLoopAsync_)}](items_: {this.items_.GetHashCode():X8}, Location: {this.baseAgent_.Location}) exits loop.");
                         break;
                     }
-                    var maybeBuff = await this.baseAgent_.SyncRecvAsync(token);
-                    if (!maybeBuff.TryOk(out var buff, out var pullError))
+                    var recvRes = await this.baseAgent_.SyncRecvAsync(token);
+                    if (!recvRes.TryOk(out var buff, out var pullError))
                         throw pullError.AsException();
 
                     var (typeHex, jsonHex) = buff;
