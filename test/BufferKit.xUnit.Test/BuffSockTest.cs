@@ -1,4 +1,4 @@
-namespace BufferKit.xUnit.Test
+namespace NsBufferKit.xUnit.Test
 {
     using System;
     using System.Collections.Generic;
@@ -12,7 +12,7 @@ namespace BufferKit.xUnit.Test
 
     using Cysharp.Threading.Tasks;
 
-    using BufferKit;
+    using NsBufferKit;
 
     [CollectionDefinition("Non-Parallel Collection", DisableParallelization = true)]
     public sealed class BufferedSocketTest

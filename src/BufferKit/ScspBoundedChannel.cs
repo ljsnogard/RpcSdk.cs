@@ -1,9 +1,11 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -16,11 +18,11 @@ namespace BufferKit
 
         private AtomicU64Flags state_;
 
+        private readonly Memory<T> items_;
+
         private readonly SemaphoreSlim consumerEvent_;
 
         private readonly SemaphoreSlim producerEvent_;
-
-        private readonly Memory<T> items_;
 
         private readonly AsyncMutex consumerMutex_;
 
@@ -36,10 +38,11 @@ namespace BufferKit
                 throw new ArgumentException(message: "Zero length memory", paramName: nameof(items));
 
             this.state_ = new AtomicU64Flags(0uL);
+            this.items_ = items;
+
             this.consumerEvent_ = new(0, 1);
             this.producerEvent_ = new(0, 1);
 
-            this.items_ = items;
             this.consumerMutex_ = new();
             this.producerMutex_ = new();
 
@@ -61,7 +64,7 @@ namespace BufferKit
                 this.consumer_.ResetGuard(guard);
                 return Option.Some<IConsumer>(this.consumer_);
             }
-            return Option.None;
+            return Option.None();
         }
 
         public async UniTask<Option<IProducer>> GetProducerAsync(CancellationToken token = default)
@@ -72,7 +75,7 @@ namespace BufferKit
                 this.producer_.ResetGuard(guard);
                 return Option.Some<IProducer>(this.producer_);
             }
-            return Option.None;
+            return Option.None();
         }
 
         private void TrySendConsumerEvent_()
@@ -320,7 +323,7 @@ namespace BufferKit
                 );
                 if (x.IsSucc(out s))
                     return Option.Some(new ScspIoMutexGuard(channel));
-                return Option.None;
+                return Option.None();
             }
 
             public static Option<ScspIoMutexGuard> SpinAcquire(
@@ -334,7 +337,7 @@ namespace BufferKit
                 );
                 if (x.IsSucc(out _))
                     return Option.Some(new ScspIoMutexGuard(channel));
-                return Option.None;
+                return Option.None();
             }
 
             public void Dispose()
@@ -414,7 +417,7 @@ namespace BufferKit
             {
                 this.channel_ = channel;
                 this.mutex_ = new();
-                this.optGuard_ = Option.None;
+                this.optGuard_ = Option.None();
             }
 
             public ScspBoundedChannel<T> Channel
@@ -441,7 +444,7 @@ namespace BufferKit
                 {
                     if (!this.optGuard_.IsSome(out var guard))
                         return;
-                    this.optGuard_ = Option.None;
+                    this.optGuard_ = Option.None();
                     guard.Dispose();
                 }
             }
@@ -525,7 +528,7 @@ namespace BufferKit
 
                 var optGuard = this.Mutex.TryAcquire();
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
 
                 var isSucc = false;
                 try
@@ -533,7 +536,7 @@ namespace BufferKit
                     var s = this.Channel.state_.Read();
                     var x = this.TryGetReaderPosition_(s, u32Capacity);
                     if (!x.IsOk(out var rp))
-                        return Option.None;
+                        return Option.None();
 
                     IChannelToken tok = createToken(guard, rp);
                     isSucc = true;
@@ -556,7 +559,7 @@ namespace BufferKit
 
                 var optGuard = await base.Mutex.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
                 var isSucc = false;
                 try
                 {
@@ -571,7 +574,7 @@ namespace BufferKit
                             return Option.Some(tok);
                         }
                         if (token.IsCancellationRequested)
-                            return Option.None;
+                            return Option.None();
                         if (x.IsErr(out s))
                         {
                             var r = this.Channel.state_.TrySpinCompareExchange(
@@ -594,7 +597,7 @@ namespace BufferKit
                         desire: ChannelState.DesireRxAwaitUnflagged,
                         token
                     );
-                    return Option.None;
+                    return Option.None();
                 }
                 catch (Exception e)
                 {
@@ -648,7 +651,7 @@ namespace BufferKit
                     var wp = (int)ChannelState.GetWriterPosition(s);
                     return Option.Some(this.Channel.items_.Span[wp]);
                 }
-                return Option.None;
+                return Option.None();
             }
 
             public async UniTask<Option<T>> EnqueueAsync(Func<T> factory, CancellationToken token = default)
@@ -659,7 +662,7 @@ namespace BufferKit
 
                 var optGuard = await base.Mutex.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
                 try
                 {
                     var s = this.Channel.state_.Read();
@@ -675,7 +678,7 @@ namespace BufferKit
                         log.Debug($"[{nameof(Producer)}.{nameof(EnqueueAsync)}] channel({this.Channel.GetHashCodeStrX8()}) TryEnqueue_ not succ: {(ChannelState)s}]");
 
                         if (token.IsCancellationRequested)
-                            return Option.None;
+                            return Option.None();
 
                         if (x.IsUnexpected(out s))
                         {
@@ -700,7 +703,7 @@ namespace BufferKit
                 }
                 catch (OperationCanceledException)
                 {
-                    return Option.None;
+                    return Option.None();
                 }
                 catch (Exception e)
                 {
@@ -795,7 +798,7 @@ namespace BufferKit
             {
                 this.channel_ = channel;
                 this.onDispose_ = null;
-                this.optGuard_ = Option.None;
+                this.optGuard_ = Option.None();
                 this.index_ = ChannelState.POSITION_ERR;
             }
 
@@ -841,7 +844,7 @@ namespace BufferKit
                     if (this.onDispose_ is not Action<ScspBoundedChannel<T>> onDispose)
                         return;
                     this.index_ = ChannelState.POSITION_ERR;
-                    this.optGuard_ = Option.None;
+                    this.optGuard_ = Option.None();
                     this.onDispose_ = null;
 
                     onDispose(this.channel_);

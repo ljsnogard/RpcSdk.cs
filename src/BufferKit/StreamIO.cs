@@ -1,9 +1,13 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.IO;
     using System.Threading;
+
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
+
     using LoggingSdk;
 
     public abstract class StreamIO
@@ -68,7 +72,7 @@ namespace BufferKit
         public async UniTask<Result<NUsize, IIoError>> ReadAsync(Memory<byte> target, CancellationToken token = default)
         {
             var log = Logger.Shared;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
@@ -141,7 +145,7 @@ namespace BufferKit
         public async UniTask<Result<NUsize, IIoError>> WriteAsync(ReadOnlyMemory<byte> source, CancellationToken token = default)
         {
             var log = Logger.Shared;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);

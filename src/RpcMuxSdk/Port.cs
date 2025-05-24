@@ -3,7 +3,7 @@ namespace RpcMuxSdk
     using System;
     using System.Diagnostics.CodeAnalysis;
 
-    using BufferKit;
+    using NsAnyLR;
 
     public readonly struct Port : IComparable<Port>, IEquatable<Port>
     {
@@ -45,7 +45,7 @@ namespace RpcMuxSdk
             => this.code == other.code;
 
         public override string ToString()
-            => $"Port({this.code})";
+            => $"portx_{this.code:X8}";
 
         public override int GetHashCode()
             => HashCode.Combine(typeof(Port), this.code);

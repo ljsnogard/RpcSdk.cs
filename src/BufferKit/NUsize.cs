@@ -1,8 +1,10 @@
 ﻿// ReSharper disable BuiltInTypeReferenceStyle
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Diagnostics.CodeAnalysis;
+
+    using NsAnyLR;
 
     /// <summary>
     /// Unsigned integer types wrapping around nuint

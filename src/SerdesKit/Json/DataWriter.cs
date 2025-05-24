@@ -4,7 +4,10 @@ namespace SerdesKit.Json
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
-    using BufferKit;
+
+    using NsAnyLR;
+    using NsBufferKit;
+
 
     public readonly struct DataWriter
     {

@@ -4,7 +4,7 @@ namespace RpcClientSdk.Mar07
     using System.Collections.Generic;
     using System.Linq;
 
-    using BufferKit;
+    using NsAnyLR;
 
     public readonly struct AssociationMapping
     {
@@ -105,7 +105,7 @@ namespace RpcClientSdk.Mar07
             if (this.hMap_.Dict.TryGetValue(typeHex, out var type))
                 return Option.Some(type);
             else
-                return Option.None;
+                return Option.None();
         }
 
         IEnumerable<(uint, Type)> IApiTypeBind.GetTypeHexEntries()

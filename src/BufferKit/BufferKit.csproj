@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AnyLR" Version="0.1.1" />
     <PackageReference Include="UniTask" Version="2.5.10" />
   </ItemGroup>
 

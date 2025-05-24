@@ -1,5 +1,5 @@
 // ReSharper disable InconsistentNaming
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Net;
@@ -9,6 +9,8 @@ namespace BufferKit
     using System.Threading.Tasks;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 

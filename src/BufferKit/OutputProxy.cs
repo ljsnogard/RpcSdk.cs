@@ -1,10 +1,12 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Collections.Concurrent;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -60,10 +62,10 @@ namespace BufferKit
         }
 
         public UniTask<Result<NUsize, IIoError>> WriteAsync(ReadOnlyMemory<T> source, CancellationToken token = default) 
-            => this.WriteAsync(source, Option.None, token);
+            => this.WriteAsync(source, Option.None(), token);
 
         public UniTask<Result<NUsize, IIoError>> WriteAsync(ReaderBuffSegm<T> source, CancellationToken token = default)
-            => this.WriteAsync(source, Option.None, token);
+            => this.WriteAsync(source, Option.None(), token);
 
         public async UniTask<Result<NUsize, IIoError>> WriteAsync
             ( ReaderBuffSegm<T> source

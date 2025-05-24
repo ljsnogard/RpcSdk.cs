@@ -2,7 +2,8 @@
 {
     using System;
 
-    using BufferKit;
+    using NsAnyLR;
+    using NsBufferKit;
 
     public readonly struct ChannelId: IEquatable<ChannelId>, IComparable<ChannelId>
     {

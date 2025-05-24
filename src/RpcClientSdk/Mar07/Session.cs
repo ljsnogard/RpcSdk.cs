@@ -1,15 +1,16 @@
 namespace RpcClientSdk.Mar07
 {
     using System;
+    using System.IO;
     using System.Threading;
-
-    using BufferKit;
 
     using Cysharp.Threading.Tasks;
     using LoggingSdk;
 
+    using NsAnyLR;
+    using NsBufferKit;
+
     using RpcMuxSdk;
-    using System.IO;
 
     public readonly struct SessionIoError : IIoError
     {
@@ -96,7 +97,7 @@ namespace RpcClientSdk.Mar07
         {
             var log = Logger.Shared;
             var recvSize = NUsize.Zero;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.rxMutex_.AcquireAsync(token);
@@ -142,7 +143,7 @@ namespace RpcClientSdk.Mar07
         {
             var log = Logger.Shared;
             var sentSize = NUsize.Zero;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.txMutex_.AcquireAsync(token);

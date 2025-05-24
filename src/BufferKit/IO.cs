@@ -1,7 +1,9 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Threading;
+
+    using NsAnyLR;
 
     using Cysharp.Threading.Tasks;
 

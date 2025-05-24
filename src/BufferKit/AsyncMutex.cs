@@ -1,10 +1,13 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     public sealed class AsyncMutex
     {
@@ -37,13 +40,62 @@ namespace BufferKit
             }
         }
 
+        private readonly struct AtomicSpinlockGuard : IDisposable
+        {
+            private readonly AsyncMutex mutex_;
+
+            private AtomicSpinlockGuard(AsyncMutex mutex)
+                => this.mutex_ = mutex;
+
+            public static Option<AtomicSpinlockGuard> Acquire
+                (AsyncMutex mutex
+                , CancellationToken token = default)
+            {
+                static bool Always(ulong s)
+                    => true;
+
+                while (!token.IsCancellationRequested)
+                {
+                    var cmpXchRes = mutex.flags_.TrySpinCompareExchange(
+                        Always,
+                        DesireQueueLocked,
+                        token
+                    );
+                    if (cmpXchRes.IsSucc(out _))
+                        return Option.Some<AtomicSpinlockGuard>(new(mutex));
+                }
+                return Option.None();
+            }
+
+            public void Dispose()
+            {
+                const uint MAX_TRY = 100u;
+                var c = 0u;
+                while (c < MAX_TRY)
+                {
+                    var xchRes = this.mutex_.flags_.TrySpinCompareExchange(
+                        ExpectQueueLocked,
+                        DesireQueueNotLocked
+                    );
+                    if (xchRes.IsSucc(out _))
+                        return;
+                    ++c;
+                }
+                throw new Exception("failed in unlocking");
+            }
+        }
+
         private readonly LinkedList<UniTaskCompletionSource<Option<Guard>>> queue_;
 
         private AtomicU64Flags flags_;
 
+        #region 
+
         private const ulong K01_B63_ACQUIRED = 1uL << 63;
 
         private const ulong K01_B62_ENQUEUED = 1uL << 62;
+
+        private const ulong K01_B61_Q_LOCKED = 1ul << 61;
 
         private static bool ExpectAcquired(ulong s)
             => (s & K01_B63_ACQUIRED) == K01_B63_ACQUIRED;
@@ -56,6 +108,12 @@ namespace BufferKit
 
         private static bool ExpectNotEnqueued(ulong s)
             => !ExpectEnqueued(s);
+
+        private static bool ExpectQueueLocked(ulong s)
+            => (s & K01_B61_Q_LOCKED) == K01_B61_Q_LOCKED;
+
+        private static bool ExpectQueueNotLocked(ulong s)
+            => !ExpectQueueLocked(s);
 
         private static bool ExpectNoContent(ulong s)
             => s == 0uL;
@@ -75,6 +133,14 @@ namespace BufferKit
         private static ulong DeisredNotEnqueued(ulong s)
             => s & (~K01_B62_ENQUEUED);
 
+        private static ulong DesireQueueLocked(ulong s)
+            => s | K01_B61_Q_LOCKED;
+
+        private static ulong DesireQueueNotLocked(ulong s)
+            => s & (~K01_B61_Q_LOCKED);
+
+        #endregion
+
         public AsyncMutex()
         {
             this.queue_ = new();
@@ -87,7 +153,7 @@ namespace BufferKit
             var x = this.flags_.TryOnceCompareExchange(s, ExpectNoContent, DesireAcquired);
             if (x.IsSucc(out s))
                 return Option.Some(new Guard(this));
-            return Option.None;
+            return Option.None();
         }
 
         public async UniTask<Option<Guard>> AcquireAsync(CancellationToken token = default)
@@ -97,29 +163,46 @@ namespace BufferKit
                 return optGuard;
 
             if (token.IsCancellationRequested)
-                return Option.None;
+                return Option.None();
 
             LinkedListNode<UniTaskCompletionSource<Option<Guard>>> node;
-            var tcs = new UniTaskCompletionSource<Option<Guard>>();
-            lock (this.queue_)
+            UniTaskCompletionSource<Option<Guard>> tcs;
+            Option<AtomicSpinlockGuard> optSpinlockGuard = Option.None();
+            try
             {
-                node = this.queue_.AddLast(tcs);
-            }
-            var cmpXchRes = this.flags_.TrySpinCompareExchange(ExpectNotEnqueued, DesiredEnqueued, token);
-            if (!cmpXchRes.IsSucc(out _) || token.IsCancellationRequested)
-                return Option.None;
+                optSpinlockGuard = AtomicSpinlockGuard.Acquire(this, token);
+                if (!optSpinlockGuard.IsSome(out var spinlockGuard))
+                    return Option.None();
 
+                tcs = new UniTaskCompletionSource<Option<Guard>>();
+                node = this.queue_.AddLast(tcs);
+
+                this.flags_.TrySpinCompareExchange(
+                    ExpectNotEnqueued,
+                    DesiredEnqueued
+                );
+                Debug.Assert(ExpectEnqueued(this.flags_.Read()));
+            }
+            finally
+            {
+                if (optSpinlockGuard.IsSome(out var spinlockGuard))
+                    spinlockGuard.Dispose();
+                optSpinlockGuard = Option.None();
+            }
             try
             {
                 optGuard = await tcs.Task.AttachExternalCancellation(token);
+                optSpinlockGuard = AtomicSpinlockGuard.Acquire(this);
+                if (!optSpinlockGuard.IsSome(out var spinlockGuard))
+                    throw new Exception();
+
+                this.queue_.Remove(node);
                 return optGuard;
             }
             finally
             {
-                lock (this.queue_)
-                {
-                    this.queue_.Remove(node);
-                }
+                if (optSpinlockGuard.IsSome(out var spinlockGuard))
+                    spinlockGuard.Dispose();
             }
         }
 

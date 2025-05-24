@@ -4,7 +4,7 @@ namespace SerdesKit.MessagePack
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
-    using BufferKit;
+    using NsBufferKit;
 
     public sealed class BufferedReader
     {

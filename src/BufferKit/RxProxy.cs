@@ -1,10 +1,12 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Collections.Concurrent;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -147,10 +149,10 @@ namespace BufferKit
             => this.Dispose_(false);
 
         public UniTask<Result<NUsize, IIoError>> FillAsync(WriterBuffSegm<T> target, CancellationToken token = default)
-            => this.FillAsync(target, Option.None, token);
+            => this.FillAsync(target, Option.None(), token);
 
         public UniTask<Result<NUsize, IIoError>> FillAsync(Memory<T> target, CancellationToken token = default)
-            => this.FillAsync(target, Option.None, token);
+            => this.FillAsync(target, Option.None(), token);
 
         public async UniTask<Result<NUsize, IIoError>> FillAsync
             ( WriterBuffSegm<T> target
@@ -249,7 +251,7 @@ namespace BufferKit
             ( NUsize length
             , CancellationToken token = default)
         {
-            return this.SkipAsync(length, Option.None, token);
+            return this.SkipAsync(length, Option.None(), token);
         }
 
         public async UniTask<Result<NUsize, IIoError>> SkipAsync

@@ -1,10 +1,12 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Collections.Generic;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -47,7 +49,7 @@ namespace BufferKit
 
         private WriterBuffSegm() : this
             ( segments: ReadOnlyMemory<Memory<T>>.Empty
-            , optGuard: Option.None
+            , optGuard: Option.None()
             , reclaim: NoReclaim<T>.Shared
             , currSegmIndex: 0
             , currSegmOffset: 0)
@@ -113,7 +115,7 @@ namespace BufferKit
                 }
                 finally
                 {
-                    this.optGuard_ = Option.None;
+                    this.optGuard_ = Option.None();
                     this.segments_ = ReadOnlyMemory<Memory<T>>.Empty;
                 }
             }

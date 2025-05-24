@@ -11,9 +11,12 @@ namespace RpcClientSdk.Mar07
 
     using Newtonsoft.Json;
 
-    using BufferKit;
+    using NsAnyLR;
+    using NsBufferKit;
 
     using RpcPeerComSdk;
+
+    using static NsBufferKit.NsUtils.StrHashExtensions;
 
     static class PushConfig
     {

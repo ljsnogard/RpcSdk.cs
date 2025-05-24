@@ -4,12 +4,14 @@ namespace RpcPeerComSdk.Jun10
     using System.Buffers.Binary;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Net;
     using System.Net.Sockets;
     using System.Threading;
     using System.Threading.Tasks;
 
-    using BufferKit;
+    using NsAnyLR;
+    using NsBufferKit;
 
     using Cysharp.Threading.Tasks;
 
@@ -80,7 +82,7 @@ namespace RpcPeerComSdk.Jun10
         {
             var optPort = await this.localPortMgr_.AllocateAsync(token);
             if (!optPort.IsSome(out var localPort))
-                return Option.None;
+                return Option.None();
 
             throw new NotImplementedException();
         }
@@ -124,14 +126,31 @@ namespace RpcPeerComSdk.Jun10
         {
             var log = Logger.Shared;
             var token = this.gracefulShutdown_.Token;
-            Option<AsyncMutex.Guard> optTxMutexGuard = Option.None;
+            Option<AsyncMutex.Guard> optTxMutexGuard = Option.None();
 
-            Memory<byte> sessionHeaderSpan = new byte[10];
-            Memory<byte> localPortSpan = sessionHeaderSpan.Slice(start: 0, length: 4);
-            Memory<byte> remotePortSpan = sessionHeaderSpan.Slice(start: 4, length: 4);
-            Memory<byte> msgFlagSpan = sessionHeaderSpan.Slice(start: 8, length: 2);
-            Memory<byte> msgSizeSpan = sessionHeaderSpan.Slice(start: 10, length: 2);
+            Memory<byte> sessionHeaderSpan = new byte[FrameHead.K_SIZE_SESS_HEAD];
+            Memory<byte> localPortSpan;
+            Memory<byte> remotePortSpan;
+            Memory<byte> msgFlagSpan;
+            Memory<byte> msgSizeSpan;
 
+            if (true)
+            {
+                int offset = 0;
+                localPortSpan = sessionHeaderSpan.Slice(start: offset, length: FrameHead.K_SIZE_PORT_DATA);
+                offset += FrameHead.K_SIZE_PORT_DATA;
+
+                remotePortSpan = sessionHeaderSpan.Slice(start: offset, length:FrameHead.K_SIZE_PORT_DATA);
+                offset += FrameHead.K_SIZE_PORT_DATA;
+
+                msgFlagSpan = sessionHeaderSpan.Slice(start: offset, length: FrameHead.K_SIZE_FLAG_DATA);
+                offset += FrameHead.K_SIZE_FLAG_DATA;
+
+                msgSizeSpan = sessionHeaderSpan.Slice(start: 10, length: FrameHead.K_SIZE_MSG_LENG);
+                offset += FrameHead.K_SIZE_MSG_LENG;
+
+                Debug.Assert(offset == FrameHead.K_SIZE_SESS_HEAD);
+            }
             var localEp = this.socket_.LocalEndPoint;
             var remoteEp = this.socket_.RemoteEndPoint;
             try
@@ -159,12 +178,14 @@ namespace RpcPeerComSdk.Jun10
                         var m = "Read session header: insufficient data len: {readSize}";
                         throw new Exception(m);
                     }
+                    var frameHead = new FrameHead(
+                        localPort: BinaryPrimitives.ReadUInt32BigEndian(localPortSpan.Span),
+                        remotePort: BinaryPrimitives.ReadUInt32BigEndian(remotePortSpan.Span),
+                        msgFlag: new(BinaryPrimitives.ReadUInt16BigEndian(msgFlagSpan.Span)),
+                        msgSize: BinaryPrimitives.ReadUInt16BigEndian(msgSizeSpan.Span)
+                    );
 
-                    var localPort = BinaryPrimitives.ReadUInt32BigEndian(localPortSpan.Span);
-                    var remotePort = BinaryPrimitives.ReadUInt32BigEndian(remotePortSpan.Span);
-                    var u16MsgSize = BinaryPrimitives.ReadUInt16BigEndian(msgSizeSpan.Span);
-
-                    Memory<byte> msgCont = new byte[u16MsgSize];
+                    Memory<byte> msgCont = new byte[frameHead.MsgSize];
                     var optReadMsgSize = await this.input_.ReadAsync(msgCont, token);
                     if (!optReadMsgSize.TryOk(out var readMsgSize, out socketIoErr))
                     {
@@ -180,8 +201,7 @@ namespace RpcPeerComSdk.Jun10
                     }
                     IEnumerable<ReadOnlyMemory<byte>> cont = new[] { (ReadOnlyMemory<byte>)msgCont };
                     var msg = new SessionMessage(cont);
-                    var chanId = new ChannelId(localPort, remotePort);
-                    var cachedMsg = new CachedSessMsg(chanId, msg);
+                    var cachedMsg = new CachedSessMsg(frameHead, msg);
 
                     /// 将接收到的报文放入待处理队列
                     while (true)
@@ -206,12 +226,13 @@ namespace RpcPeerComSdk.Jun10
             }
         }
 
-        private async Task ConsumeCachedMsgAsync_()
-        {
-            var log = Logger.Shared;
-        }
+        private Task ConsumeCachedMsgAsync_()
+            => throw new NotImplementedException();
     }
 
+    /// <summary>
+    /// 在流上复用提供 channel 并控制 channel 生命周期
+    /// </summary>
     internal readonly struct MessageFlags
     {
         public readonly ushort Value;
@@ -219,18 +240,35 @@ namespace RpcPeerComSdk.Jun10
         public MessageFlags(ushort v)
             => this.Value = v;
 
+        public bool Fin
+            => (this.Value & (1u)) != 0;
+
+        public bool Syn
+            => (this.Value & (1u << 1)) != 0;
+
+        public bool Rst
+            => (this.Value & (1u << 2)) != 0;
+
+        public bool Ack
+            => (this.Value & (1u << 3)) != 0;
+
         public static MessageFlags Build
             (bool fin
             , bool syn
             , bool rst
             , bool ack)
         {
-            
+            throw new NotImplementedException();
         }
     }
 
-    internal readonly struct CachedSessMsg
+    internal readonly struct FrameHead
     {
+        public const int K_SIZE_SESS_HEAD = 12;
+        public const int K_SIZE_PORT_DATA = 4;
+        public const int K_SIZE_FLAG_DATA = 2;
+        public const int K_SIZE_MSG_LENG = 2;
+
         public readonly Port LocalPort;
 
         public readonly Port RemotePort;
@@ -239,19 +277,28 @@ namespace RpcPeerComSdk.Jun10
 
         public readonly ushort MsgSize;
 
-        public readonly SessionMessage Message;
-
-        public CachedSessMsg
-            (Port localPort
+        public FrameHead
+            ( Port localPort
             , Port remotePort
-            , ushort msgFlag
-            , ushort msgSize
-            , SessionMessage message)
+            , MessageFlags msgFlag
+            , ushort msgSize)
         {
             this.LocalPort = localPort;
             this.RemotePort = remotePort;
-            this.MsgFlag = new(msgFlag);
+            this.MsgFlag = msgFlag;
             this.MsgSize = msgSize;
+        }
+    }
+
+    internal readonly struct CachedSessMsg
+    {
+        public readonly FrameHead Head;
+
+        public readonly SessionMessage Message;
+
+        public CachedSessMsg(FrameHead head, SessionMessage message)
+        {
+            this.Head = head;
             this.Message = message;
         }
     }
@@ -279,12 +326,12 @@ namespace RpcPeerComSdk.Jun10
 
         public async UniTask<Option<Port>> AllocateAsync(CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
 
                 if (this.idlePorts_.Count != 0)
                 {
@@ -297,7 +344,7 @@ namespace RpcPeerComSdk.Jun10
                     {
                         this.nextPort_ = new Port(this.nextPort_.code + 1u);
                         if (token.IsCancellationRequested)
-                            return Option.None;
+                            return Option.None();
                         else
                             continue;
                     }
@@ -315,14 +362,14 @@ namespace RpcPeerComSdk.Jun10
 
         public async UniTask<Option<ChannelId>> FindChannelId(Port localPort, CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
                 if (!this.activePorts_.TryGetValue(localPort, out var chanId))
-                    return Option.None;
+                    return Option.None();
 
                 if (chanId.LocalPort != localPort)
                     throw new Exception($"Err port bind: chanId.LocalPort({chanId.LocalPort}), query({localPort})");
@@ -338,14 +385,14 @@ namespace RpcPeerComSdk.Jun10
 
         public async UniTask<Option<Port>> ExpireAsync(Port port, CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
                 if (!this.activePorts_.TryGetValue(port, out var chanId))
-                    return Option.None;
+                    return Option.None();
                 if (!this.activePorts_.Remove(port))
                     throw new Exception($"port {port.code} is not active.");
 
@@ -427,7 +474,7 @@ namespace RpcPeerComSdk.Jun10
 
         public async UniTask<bool> StartSessionAsync(CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.infoMutex_.AcquireAsync(token);
@@ -451,7 +498,7 @@ namespace RpcPeerComSdk.Jun10
         private async Task TxLoopAsync_()
         {
             var token = this.gracefulShutdown_.Token;
-            Option<AsyncMutex.Guard> optTxMutexGuard = Option.None;
+            Option<AsyncMutex.Guard> optTxMutexGuard = Option.None();
 
             Memory<byte> sessionHeaderSpan = new byte[10];
 
@@ -481,18 +528,18 @@ namespace RpcPeerComSdk.Jun10
                     BinaryPrimitives.WriteUInt32BigEndian(remotePortSpan.Span, this.session_.RemotePort.code);
                     BinaryPrimitives.WriteUInt16BigEndian(msgSizeSpan.Span, u16size);
 
-                    await this.connTx_.WriteAsync(sessionHeaderSpan, Option.None, default);
+                    await this.connTx_.WriteAsync(sessionHeaderSpan, Option.None(), default);
                     var msgLenWritten = NUsize.Zero;
                     foreach (var segm in msg.Cont)
                     {
-                        await this.connTx_.WriteAsync(segm, Option.None, default);
+                        await this.connTx_.WriteAsync(segm, Option.None(), default);
                         msgLenWritten += segm.NUsizeLength();
                         if (msgLenWritten >= ushort.MaxValue)
                             break;
                     }
 
                     txGuard.Dispose();
-                    optTxMutexGuard = Option.None;
+                    optTxMutexGuard = Option.None();
                 }
             }
             finally

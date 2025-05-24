@@ -1,10 +1,12 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.IO;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -17,6 +19,13 @@ namespace BufferKit
 
         public Exception AsException()
             => this.exception_;
+    }
+
+    internal readonly struct MapError<E> : IMap<E, IIoError>
+        where E : struct, IIoError
+    {
+        public IIoError Map(E err)
+            => err as IIoError;
     }
 
     public sealed class MemStreamIo : IUnbufferedInput<byte>, IUnbufferedOutput<byte>
@@ -50,7 +59,7 @@ namespace BufferKit
         {
             var log = Logger.Shared;
             var readSize = NUsize.Zero;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             var targetSize = target.NUsizeLength();
             try
             {
@@ -90,7 +99,7 @@ namespace BufferKit
         {
             var log = Logger.Shared;
             var writtenSize = NUsize.Zero;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.txMutex_.AcquireAsync(token);

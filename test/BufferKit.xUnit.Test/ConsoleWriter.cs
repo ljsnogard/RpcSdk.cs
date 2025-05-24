@@ -1,4 +1,4 @@
-namespace BufferKit.xUnit.Test
+namespace NsBufferKit.xUnit.Test
 {
     using System.IO;
     using System.Text;

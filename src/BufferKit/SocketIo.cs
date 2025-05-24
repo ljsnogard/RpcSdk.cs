@@ -1,4 +1,4 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Net;
@@ -8,6 +8,8 @@ namespace BufferKit
     using System.Threading.Tasks;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -179,7 +181,7 @@ namespace BufferKit
             if (this.isClosed_)
                 return Result.Err(new SocketIoError(SocketIoError.ERR_CLOSED));
 
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             NUsize recvSize = NUsize.Zero;
             try
             {
@@ -298,7 +300,7 @@ namespace BufferKit
             if (this.isClosed_)
                 return Result.Err(new SocketIoError(SocketIoError.ERR_CLOSED));
 
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             NUsize sentSize = NUsize.Zero;
             try
             {

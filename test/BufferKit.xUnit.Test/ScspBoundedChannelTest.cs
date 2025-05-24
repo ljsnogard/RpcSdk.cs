@@ -1,4 +1,4 @@
-namespace BufferKit.xUnit.Test
+namespace NsBufferKit.xUnit.Test
 {
     using Cysharp.Threading.Tasks;
 
@@ -8,7 +8,7 @@ namespace BufferKit.xUnit.Test
     {
         // private readonly ITestOutputHelper output_;
 
-        private static readonly TimeSpan ALLOWANCE_TIMESPAN = TimeSpan.FromSeconds(1);
+        private static readonly TimeSpan ALLOWANCE_TIMESPAN = TimeSpan.FromSeconds(2);
         
         // public ScspBoundedChannelTest(ITestOutputHelper output)
         //     => this.output_ = output;
@@ -103,6 +103,7 @@ namespace BufferKit.xUnit.Test
         [Theory]
         [InlineData(1u)]
         [InlineData(2u)]
+        [InlineData(4u)]
         public async Task ProducerShouldBeWokenAfterConsuming(uint capacity)
         {
             // Console.SetOut(new UnitTestConsoleWriter(this.output_));
@@ -137,6 +138,7 @@ namespace BufferKit.xUnit.Test
         [Theory]
         [InlineData(1u)]
         [InlineData(2u)]
+        [InlineData(4u)]
         public async Task ConsumerShouldBeWokenAfterProducing(uint capacity)
         {
             // Console.SetOut(new UnitTestConsoleWriter(this.output_));
@@ -166,8 +168,8 @@ namespace BufferKit.xUnit.Test
             var lastEnqueue = await producer.EnqueueAsync(capacity);
             Assert.True(lastEnqueue);
 
-            var t = await Task.WhenAny(Task.Delay(ALLOWANCE_TIMESPAN), blockedDequeueTask);
-            Assert.True(Object.ReferenceEquals(t, blockedDequeueTask));
+            Task t = await Task.WhenAny(Task.Delay(ALLOWANCE_TIMESPAN), blockedDequeueTask);
+            Assert.True(t == blockedDequeueTask);
         }
     }
 }

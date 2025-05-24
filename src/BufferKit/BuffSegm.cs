@@ -1,4 +1,4 @@
-﻿namespace BufferKit
+﻿namespace NsBufferKit
 {
     using System;
     using System.Collections.Generic;

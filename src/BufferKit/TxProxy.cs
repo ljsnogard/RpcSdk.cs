@@ -1,10 +1,12 @@
-namespace BufferKit
+namespace NsBufferKit
 {
     using System;
     using System.Collections.Concurrent;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -121,13 +123,13 @@ namespace BufferKit
             => new ObjectDisposedException(typeof(TxProxy<T>).ToString());
 
         public UniTask<Result<NUsize, IIoError>> DumpAsync(RxProxy<T> source, CancellationToken token = default)
-            => this.DumpAsync(source, Option.None, token);
+            => this.DumpAsync(source, Option.None(), token);
 
         public UniTask<Result<NUsize, IIoError>> DumpAsync(ReaderBuffSegm<T> source, CancellationToken token = default)
-            => this.DumpAsync(source, Option.None, token);
+            => this.DumpAsync(source, Option.None(), token);
 
         public UniTask<Result<NUsize, IIoError>> DumpAsync(ReadOnlyMemory<T> source, CancellationToken token = default)
-            => this.DumpAsync(source, Option.None, token);
+            => this.DumpAsync(source, Option.None(), token);
 
         /// <summary>
         /// 从一个消费端中取出数据作为源数据写入
@@ -162,7 +164,7 @@ namespace BufferKit
                     }
                     try
                     {
-                        var fillRes = await source.FillAsync(dstSegm, Option.None, token);
+                        var fillRes = await source.FillAsync(dstSegm, Option.None(), token);
                         if (!fillRes.TryOk(out var copyCount, out var fillErr))
                         {
                             if (sentCount > 0)
@@ -284,7 +286,7 @@ namespace BufferKit
             ( Func<T> factory
             , CancellationToken token = default)
         {
-            return this.EnqueueAsync(factory, Option.None, token);
+            return this.EnqueueAsync(factory, Option.None(), token);
         }
 
         public async UniTask<Result<T, IIoError>> EnqueueAsync

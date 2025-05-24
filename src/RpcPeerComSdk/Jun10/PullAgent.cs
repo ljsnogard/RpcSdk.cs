@@ -6,13 +6,14 @@ namespace RpcPeerComSdk.Jun10
     using System.Threading;
     using System.Threading.Tasks;
 
-    using BufferKit;
-
     using Cysharp.Threading.Tasks;
+
+    using Newtonsoft.Json;
 
     using LoggingSdk;
 
-    using Newtonsoft.Json;
+    using NsAnyLR;
+    using NsBufferKit;
 
     using RpcPeerComSdk;
 
@@ -80,7 +81,7 @@ namespace RpcPeerComSdk.Jun10
         {
             var log = Logger.Shared;
             Memory<SessionMessage> buffer = new SessionMessage[1];
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);

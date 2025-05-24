@@ -1,5 +1,7 @@
-namespace BufferKit
+namespace NsBufferKit
 {
+    using NsAnyLR;
+
     public readonly struct Demand
     {
         private readonly NUsize floor_;
@@ -22,10 +24,10 @@ namespace BufferKit
         }
 
         public Option<NUsize> Floor
-            => this.flags_ % K_FLOOR_VALID == 0 ? Option.Some(this.floor_) : Option.None;
+            => this.flags_ % K_FLOOR_VALID == 0 ? Option.Some(this.floor_) : Option.None();
 
         public Option<NUsize> Ceiling
-            => this.flags_ % K_CEILING_VALID == 0 ? Option.Some(this.ceiling_) : Option.None;
+            => this.flags_ % K_CEILING_VALID == 0 ? Option.Some(this.ceiling_) : Option.None();
 
         public override string ToString()
         {

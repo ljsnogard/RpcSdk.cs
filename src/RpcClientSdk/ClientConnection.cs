@@ -6,7 +6,7 @@ namespace RpcClientSdk
     using System.Threading;
     using System.Threading.Tasks;
 
-    using BufferKit;
+    using NsBufferKit;
 
     using RpcMuxSdk;
 

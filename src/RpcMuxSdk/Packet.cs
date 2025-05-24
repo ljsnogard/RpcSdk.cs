@@ -6,7 +6,7 @@ namespace RpcMuxSdk
 
     using Cysharp.Threading.Tasks;
 
-    using BufferKit;
+    using NsBufferKit;
 
     using DualByte = System.UInt16;
     using QuadByte = System.UInt32;

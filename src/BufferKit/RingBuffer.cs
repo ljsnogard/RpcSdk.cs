@@ -1,4 +1,4 @@
-﻿namespace BufferKit
+﻿namespace NsBufferKit
 {
     using System;
     using System.Diagnostics.CodeAnalysis;
@@ -8,6 +8,8 @@
     using System.Threading.Tasks;
 
     using Cysharp.Threading.Tasks;
+
+    using NsAnyLR;
 
     using LoggingSdk;
 
@@ -123,8 +125,8 @@
             this.capacity_ = (uint)memory.Length;
             this.state_ = new(initState);
 
-            this.pendingTxDemand_ = Option.None;
-            this.pendingRxDemand_ = Option.None;
+            this.pendingTxDemand_ = Option.None();
+            this.pendingRxDemand_ = Option.None();
         }
 
         public RingBuffer(NUsize capacity) : this(new Memory<T>(new T[capacity]))
@@ -294,7 +296,7 @@
                     await waitTask;
                     log.Debug($"[{nameof(RingBuffer<T>)}.{nameof(RxAsync_)}] end rx await");
 
-                    this.ResetDemand_(ref this.pendingRxDemand_, Option.None);
+                    this.ResetDemand_(ref this.pendingRxDemand_, Option.None());
                 }
             }
             catch (OperationCanceledException)
@@ -310,8 +312,8 @@
             }
             finally
             {
-                this.ResetDemand_(ref this.pendingRxDemand_, Option.None);
-                this.pendingRxDemand_ = Option.None;
+                this.ResetDemand_(ref this.pendingRxDemand_, Option.None());
+                this.pendingRxDemand_ = Option.None();
                 if (!isSucc)
                     guard.Dispose();
             }
@@ -406,7 +408,7 @@
                     await waitTask;
                     log.Debug($"[{nameof(RingBuffer<T>)}.{nameof(WriteAsync)}] end tx await");
 
-                    this.ResetDemand_(ref this.pendingTxDemand_, Option.None);
+                    this.ResetDemand_(ref this.pendingTxDemand_, Option.None());
                 }
             }
             catch (OperationCanceledException)
@@ -423,7 +425,7 @@
             finally
             {
                 this.state_.SpinSetTxAwaitUnflagged();
-                this.ResetDemand_(ref this.pendingTxDemand_, Option.None);
+                this.ResetDemand_(ref this.pendingTxDemand_, Option.None());
                 if (!isSucc)
                     guard.Dispose();
             }
@@ -504,7 +506,7 @@
         {
             var res = this.state_.SpinAcquireIoMutex(token);
             if (!res.IsOk(out var ioMutex))
-                return Option.None;
+                return Option.None();
             Option<Demand> prevDemand = default;
             using (ioMutex)
             {
@@ -520,7 +522,7 @@
         {
             var res = this.state_.SpinAcquireIoMutex(token);
             if (!res.IsOk(out var ioMutex))
-                return Option.None;
+                return Option.None();
             using (ioMutex)
             {
                 return slot;

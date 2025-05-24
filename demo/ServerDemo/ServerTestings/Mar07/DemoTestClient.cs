@@ -14,7 +14,7 @@ namespace ServerDemo.ServerTestings.Mar07
 
     using Newtonsoft.Json;
 
-    using BufferKit;
+    using NsBufferKit;
 
     using RpcPeerComSdk;
     using RpcClientSdk.Mar07;

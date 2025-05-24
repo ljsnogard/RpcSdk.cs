@@ -1,15 +1,19 @@
 namespace SerdesKit
 {
     using System;
+    using System.Linq;
     using System.Collections.Generic;
     using System.Threading;
 
     using Cysharp.Threading.Tasks;
 
-    using BufferKit;
-    using System.Linq;
+    using NsAnyLR;
+    using NsBufferKit;
+
     using LoggingSdk;
     using VisitAsyncUtils;
+
+    using static NsBufferKit.NsUtils.StrHashExtensions;
 
     public interface ISerdesTypeContext
     {
@@ -24,43 +28,6 @@ namespace SerdesKit
         public UniTask<ReadOnlyMemory<ISerdesTypeContext>> GetSubTypesAsync(CancellationToken token = default);
 
         public UniTask<ReadOnlyMemory<(string, ISerdesTypeContext)>> GetFieldsAsync(CancellationToken token = default);
-    }
-
-    public static class StrHashExtensions
-    {
-        public static uint GetStableHashCode(this string str)
-        {
-            unchecked
-            {
-                uint hash1 = 5381;
-                uint hash2 = hash1;
-
-                for (int i = 0; i < str.Length && str[i] != '\0'; i += 2)
-                {
-                    hash1 = ((hash1 << 5) + hash1) ^ str[i];
-                    if (i == str.Length - 1 || str[i + 1] == '\0')
-                        break;
-                    hash2 = ((hash2 << 5) + hash2) ^ str[i + 1];
-                }
-                return hash1 + (hash2 * 1566083941);
-            }
-        }
-
-        public static uint GetTypeHex(this Type type)
-            => type.FullName.GetStableHashCode();
-
-        public static uint GetTypeHexWithRound(this Type type, uint round)
-        {
-            var name = type.FullName;
-            var hex = type.GetTypeHex();
-            while (round != 0)
-            {
-                name = name + $"_{hex:X8}";
-                hex = name.GetStableHashCode();
-                round -= 1u;
-            }
-            return hex;
-        }
     }
 
     public sealed class ConcreteSerdesTypeContext : ISerdesTypeContext
@@ -186,17 +153,17 @@ namespace SerdesKit
             public async UniTask<Option<ConcreteSerdesTypeContext>> FindWithHexAsync(uint typeHex, CancellationToken token = default)
             {
                 var log = Logger.Shared;
-                Option<AsyncMutex.Guard> optGuard = Option.None;
+                Option<AsyncMutex.Guard> optGuard = Option.None();
                 try
                 {
                     optGuard = await this.mutex_.AcquireAsync(token);
                     if (!optGuard.IsSome(out var guard))
-                        return Option.None;
+                        return Option.None();
 
                     if (this.hexCtxDict_.TryGetValue(typeHex, out var ctx))
                         return Option.Some(ctx);
                     else
-                        return Option.None;
+                        return Option.None();
                 }
                 catch (Exception ex)
                 {
@@ -213,12 +180,12 @@ namespace SerdesKit
             public async UniTask<Option<ConcreteSerdesTypeContext>> FindWithTypeAsync(Type dataType, CancellationToken token = default)
             {
                 var log = Logger.Shared;
-                Option<AsyncMutex.Guard> optGuard = Option.None;
+                Option<AsyncMutex.Guard> optGuard = Option.None();
                 try
                 {
                     optGuard = await this.mutex_.AcquireAsync(token);
                     if (!optGuard.IsSome(out var guard))
-                        return Option.None;
+                        return Option.None();
 
                     var round = 0u;
                     uint typeHex = 0u;
@@ -233,7 +200,7 @@ namespace SerdesKit
                         log.Debug($"[{nameof(GlobalCtxCache)}.{nameof(FindWithTypeAsync)}] round: {round}, type: {dataType}");
                         continue;
                     }
-                    return Option.None;
+                    return Option.None();
                 }
                 catch (Exception ex)
                 {
@@ -253,7 +220,7 @@ namespace SerdesKit
                 CancellationToken token = default)
             {
                 var log = Logger.Shared;
-                Option<AsyncMutex.Guard> optGuard = Option.None;
+                Option<AsyncMutex.Guard> optGuard = Option.None();
                 try
                 {
                     optGuard = await this.mutex_.AcquireAsync(token);

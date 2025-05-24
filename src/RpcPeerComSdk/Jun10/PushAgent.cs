@@ -11,9 +11,12 @@ namespace RpcPeerComSdk.Jun10
 
     using Newtonsoft.Json;
 
-    using BufferKit;
+    using NsAnyLR;
+    using NsBufferKit;
 
     using RpcPeerComSdk;
+
+    using static NsBufferKit.NsUtils.StrHashExtensions;
 
     static class PushConfig
     {
@@ -78,7 +81,7 @@ namespace RpcPeerComSdk.Jun10
             if (!msgPayload.NUsizeLength().TryInto(out ushort u16msgSize))
                 throw new Exception($"message size({msgPayload.Length}) invalid");
 
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
@@ -154,7 +157,7 @@ namespace RpcPeerComSdk.Jun10
             if (item is not TItem)
                 throw new ArgumentNullException(paramName: nameof(item));
 
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);

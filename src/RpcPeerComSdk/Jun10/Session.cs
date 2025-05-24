@@ -5,7 +5,8 @@ namespace RpcPeerComSdk.Jun10
     using System.Threading;
     using System.Threading.Tasks;
 
-    using BufferKit;
+    using NsAnyLR;
+    using NsBufferKit;
 
     using Cysharp.Threading.Tasks;
     using LoggingSdk;
@@ -58,7 +59,7 @@ namespace RpcPeerComSdk.Jun10
             this.sessionMutex_ = new();
 
             this.apiTypeBind_ = apiTypeBind;
-            this.optExtUser_ = Option.None;
+            this.optExtUser_ = Option.None();
         }
 
         public Port LocalPort
@@ -85,7 +86,7 @@ namespace RpcPeerComSdk.Jun10
         {
             var log = Logger.Shared;
             var recvSize = NUsize.Zero;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.rxMutex_.AcquireAsync(token);
@@ -99,7 +100,7 @@ namespace RpcPeerComSdk.Jun10
                     if (recvSize >= targetLen)
                         return Result.Ok(recvSize);
                     var msg = await consumer.ReadAsync(token);
-                    target.Span[(int)recvSize] = await consumer.ReadAsync();
+                    target.Span[(int)recvSize] = msg;
                     recvSize += 1u;
                 }
             }
@@ -128,7 +129,7 @@ namespace RpcPeerComSdk.Jun10
         {
             var log = Logger.Shared;
             var sentSize = NUsize.Zero;
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.txMutex_.AcquireAsync(token);
@@ -136,7 +137,7 @@ namespace RpcPeerComSdk.Jun10
                     return Result.Ok(sentSize);
 
                 var sourceLen = source.NUsizeLength();
-                Option<SessionMessage> optLastSent = Option.None;
+                Option<SessionMessage> optLastSent = Option.None();
                 while (true)
                 {
                     if (sentSize >= sourceLen)
@@ -172,20 +173,20 @@ namespace RpcPeerComSdk.Jun10
 
         internal async UniTask<Option<(SessionTx, SessionRx)>> ExpireAsync(CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.sessionMutex_.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
 
                 if (!this.optExtUser_.IsSome(out var user))
-                    return Option.None;
+                    return Option.None();
 
                 (var txUser, var rxUser) = user;
                 var txTask = txUser.ExpireAsync();
                 var rxTask = rxUser.ExpireAsync();
-                optGuard = Option.None;
+                optGuard = Option.None();
                 guard.Dispose();
 
                 await UniTask.WhenAll(txTask, rxTask);
@@ -204,12 +205,12 @@ namespace RpcPeerComSdk.Jun10
             , Port remotePort
             , CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.sessionMutex_.AcquireAsync(token);
                 if (!optGuard.IsSome(out var guard))
-                    return Option.None;
+                    return Option.None();
 
                 if (this.optExtUser_.IsSome())
                     throw new Exception("Cannot reactivate when this is not expired");
@@ -241,7 +242,7 @@ namespace RpcPeerComSdk.Jun10
             }
             catch (OperationCanceledException)
             {
-                return Option.None;
+                return Option.None();
             }
         }
 
@@ -308,7 +309,7 @@ namespace RpcPeerComSdk.Jun10
 
         public async UniTask<Result<NUsize, SessionIoError>> ReadAsync(Memory<SessionMessage> target, CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
@@ -329,7 +330,7 @@ namespace RpcPeerComSdk.Jun10
 
         internal async UniTask<bool> ExpireAsync(CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
@@ -366,7 +367,7 @@ namespace RpcPeerComSdk.Jun10
 
         public async UniTask<Result<NUsize, SessionIoError>> WriteAsync(ReadOnlyMemory<SessionMessage> source, CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
@@ -387,7 +388,7 @@ namespace RpcPeerComSdk.Jun10
 
         internal async UniTask<bool> ExpireAsync(CancellationToken token = default)
         {
-            Option<AsyncMutex.Guard> optGuard = Option.None;
+            Option<AsyncMutex.Guard> optGuard = Option.None();
             try
             {
                 optGuard = await this.mutex_.AcquireAsync(token);
